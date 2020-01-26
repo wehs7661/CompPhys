@@ -31,41 +31,42 @@ class SHO_integrators:
         elif reverse is True:
             self.dt = -dt
         
-        x_approx, p_approx = [x_0], [p_0]
+        self.x_approx, self.p_approx = [x_0], [p_0]
 
         for i in range(self.n):
             if self.integrator == 'Euler':
-                x_approx.append(x_approx[-1] + p_approx[-1] * self.dt)
+                self.x_approx.append(self.x_approx[-1] + self.p_approx[-1] * self.dt)
                 # note that at this point x_approx[-1] is the value that was appended now
-                p_approx.append(p_approx[-1] - x_approx[-2] * self.dt)
+                self.p_approx.append(self.p_approx[-1] - self.x_approx[-2] * self.dt)
             elif self.integrator == 'symplectic Euler':
-                x_approx.append(x_approx[-1] + p_approx[-1] * self.dt)  # same as Euler
-                p_approx.append(p_approx[-1] - x_approx[-1] * self.dt)
+                self.x_approx.append(self.x_approx[-1] + self.p_approx[-1] * self.dt)  # same as Euler
+                self.p_approx.append(self.p_approx[-1] - self.x_approx[-1] * self.dt)
             elif self.integrator == 'Verlet':
-                p_half = p_approx[-1] - x_approx[-1] * (self.dt) / 2
-                x_approx.append(x_approx[-1] + p_half * self.dt)
-                p_approx.append(p_half - x_approx[-1] * (self.dt) / 2)
-            else:
-                print('Error: Invalid integrator! Available options are:')
-                print('"Euler", "symplectic Euler", and "Verlet".')
-                break
-
-        return x_approx, p_approx        
+                p_half = self.p_approx[-1] - self.x_approx[-1] * (self.dt) / 2
+                self.x_approx.append(self.x_approx[-1] + p_half * self.dt)
+                self.p_approx.append(p_half - self.x_approx[-1] * (self.dt) / 2)
         
+        return self          
 
-    def SHO_plots_compare(self, exact=True, x1=None, p1=None, dt1=None, \
-                          integrator1=None, x2, p2, energy=True):
+    def SHO_plots_compare(self, SHO_obj1=None, SHO_obj2=None, exact=True, energy=True):
         if exact is True:
             x1, p1, E1 = self.x_exact, self.p_exact, self.E_exact
             title1 = 'Exact solution'
-        if exact = False and x1 is not None and p1 is not None:
+            if SHO_obj1 is not None:
+                print('Error: SHO_obj1 has been assigned to be the exact solution.')
+                print('Specify SHO_obj2 instead.')
+                sys.exit()
+        if exact is False:
+            x1, p1, dt1 = SHO_obj1.x_approx, SHO_obj1.p_approx, SHO_obj1.dt
             E1 = 0.5 * np.power(x1, 2) + 0.5 * np.power(p1, 2)
-            title1 = 'Approximation by %s scheme' % integrator
-        else:
-            print("Error: invalid/insufficient input parameters!")
-            sys.exit()
+            title1 = 'Approximation by %s scheme' % SHO_obj1.integrator
+            if SHO_obj1 is None and SHO_obj2 is None:
+                print('Error: invalid/insufficient input parameters!')
+                sys.exit()   
 
-        E2 = 0.5 * np.power(x2, 2) + 0.5 * np.power(p2, 2)
+        x2, p2, dt2 = SHO_obj2.x_approx, SHO_obj2.p_approx, SHO_obj2.dt
+        E2 = 0.5 * np.power(x2, 2) + 0.5 * np.power(p2, 2)     
+        title2 = 'Approximation by %s scheme' % SHO_obj2.integrator
 
         # Plotting: phase-space trajectory
         plt.figure()
@@ -81,30 +82,36 @@ class SHO_integrators:
 
         plt.subplot(1, 2, 2)
         plt.scatter(x2, p2, c=plt.cm.GnBu(np.linspace(0, 1, len(x2))))
-        plt.title('Approximation by %s scheme' % self.integrator)
+        plt.title(title2)
         plt.xlabel('Dimensionless position')
         plt.ylabel('Dimensionless momentum')
         plt.grid()
 
+        # Plotting: energ as a function of time
         if energy is True:
-            # Plotting: the total energy as a function of time
             plt.figure()
             _, ax = plt.subplots(nrows=1, ncols=2, figsize=(12, 5))
             plt.suptitle('The total energy as a function of time')
 
             plt.subplot(1, 2, 1)
-            plt.plot(self.t, E1)
+            if exact is True:
+                plt.plot(self.t, E1)
+            elif exact is False:
+                plt.plot(np.arange(len(E1)) * dt1, E1, '.')
             plt.xlabel('Time')
             plt.ylabel('Dimensionless total energy')
+            if max(abs(E1)) >= 10000:
+                plt.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
+            plt.title(title1)
             plt.grid()
 
             plt.subplot(1, 2, 2)
-            plt.plot(np.arange(len(E_2)) * self.dt, E_2, '*')
+            plt.plot(np.arange(len(E2)) * dt2, E2, '.')
             plt.xlabel('Time')
             plt.ylabel('Dimensionless total energy')
-            if max(abs(E_approx)) >= 10000:
+            if max(abs(E2)) >= 10000:
                 plt.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
-            plt.title('Approximation by %s scheme' % self.integrator)
+            plt.title(title2)
             plt.grid()
             
     def SHO_plots_reverse(self, x_forward, p_forward, x_backward, p_backward):
