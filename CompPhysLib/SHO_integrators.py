@@ -45,6 +45,9 @@ class SHO_integrators:
                 p_half = self.p_approx[-1] - self.x_approx[-1] * (self.dt) / 2
                 self.x_approx.append(self.x_approx[-1] + p_half * self.dt)
                 self.p_approx.append(p_half - self.x_approx[-1] * (self.dt) / 2)
+
+        self.E = 0.5 * np.power(self.x_approx, 2) + 0.5 * np.power(self.p_approx, 2)
+        self.RMSD = np.sqrt((1/len(self.E) * np.sum(np.power(self.E - 1, 2))))
         
         return self          
 
@@ -57,15 +60,13 @@ class SHO_integrators:
                 print('Specify SHO_obj2 instead.')
                 sys.exit()
         if exact is False:
-            x1, p1, dt1 = SHO_obj1.x_approx, SHO_obj1.p_approx, SHO_obj1.dt
-            E1 = 0.5 * np.power(x1, 2) + 0.5 * np.power(p1, 2)
+            x1, p1, E1, dt1 = SHO_obj1.x_approx, SHO_obj1.p_approx, SHO_obj1.E, SHO_obj1.dt
             title1 = 'Approximation by %s scheme' % SHO_obj1.integrator
             if SHO_obj1 is None and SHO_obj2 is None:
                 print('Error: invalid/insufficient input parameters!')
                 sys.exit()   
 
-        x2, p2, dt2 = SHO_obj2.x_approx, SHO_obj2.p_approx, SHO_obj2.dt
-        E2 = 0.5 * np.power(x2, 2) + 0.5 * np.power(p2, 2)     
+        x2, p2, E2, dt2 = SHO_obj2.x_approx, SHO_obj2.p_approx, SHO_obj2.E, SHO_obj2.dt 
         title2 = 'Approximation by %s scheme' % SHO_obj2.integrator
 
         # Plotting: phase-space trajectory
