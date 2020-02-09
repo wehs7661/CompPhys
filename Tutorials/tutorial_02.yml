@@ -1,0 +1,12 @@
+# Molecular dynamics simulation parameters
+N_particles: 5
+N_steps: 1000
+dt: 0.001
+m: 1 # the mass of the particle (all the same)
+n: 2 # the order of the total external energy
+u: 1 # the coefficient of the total external energy
+k: 1 # the order of the pairwise potential 
+a: 1 # the coefficient of pariwise potential
+r_c: 0 # the distance cutoff for the interaction potential (r_c = 0 : no truncation)
+box_length: 3
+print_freq: 1
