@@ -1,4 +1,5 @@
 import os
+import sys
 import yaml
 import copy
 import numpy as np
@@ -57,7 +58,7 @@ class MDParameters:
             r_ij = coord_i - coord_j
             r_ij = r_ij - self.box_length * np.round(r_ij / self.box_length)
             dist = norm(r_ij)
-
+        dist = norm(coord_i - coord_j)
         return dist
 
 
@@ -91,6 +92,9 @@ class ComputeForces(MDParameters):
         return f_int
 
     def LJ_force_ij(self, coord_i, coord_j):
+        if self.PBC == 'yes':
+            coord_i -= self.box_length * np.round(coord_i / self.box_length)
+            coord_j -= self.box_length * np.round(coord_j / self.box_length)
         f_LJ = np.zeros([1, self.dimension])  # x and y (and z) components
         r_ij = MDParameters.calc_dist(self, coord_i, coord_j)
         r12 = (self.epsilon / r_ij) ** 12
@@ -105,6 +109,9 @@ class ComputeForces(MDParameters):
         of all the particles, which is an array of f_ext_i + sum_{j=i+1}^{N}(f_int_ij), where 
         i ranges from 1 to the number of particles
         """
+        if self.PBC == 'yes':
+            coords -= self.box_length * np.round(coords / self.box_length)
+
         if self.potential == 'central':
             # Step 1: First calculate the interaction force of each pair and store in a dictionary
             f0_int_dict = {}
@@ -161,6 +168,8 @@ class ComputeForces(MDParameters):
         This function calculates the total magnitude of the angular momenta of the system.
         In this case, when r and p are both 2-D numpy array, magnitude of L = norm(np.cross(r, p))
         """
+        if self.PBC == 'yes':
+            coords -= self.box_length * np.round(coords / self.box_length)
         L_vec = np.cross(coords, velocities)
         L_total = 0
         for i in range(self.N_particles):
@@ -194,6 +203,9 @@ class ComputePotentials(MDParameters):
         return p_int
 
     def LJ_potential(self, coord_i, coord_j):
+        if self.PBC == 'yes':
+            coord_i -= self.box_length * np.round(coord_i / self.box_length)
+            coord_j -= self.box_length * np.round(coord_j / self.box_length)
         r_ij = MDParameters.calc_dist(self, coord_i, coord_j)
         r12 = (self.epsilon / r_ij) ** 12
         r6 = (self.epsilon / r_ij) ** 6
@@ -206,6 +218,9 @@ class ComputePotentials(MDParameters):
         return p_LJ
 
     def total_potential(self, coords):
+        if self.PBC == 'yes':
+            coords -= self.box_length * np.round(coords / self.box_length)
+
         if self.potential == 'central':
             # Step 1: calculate \sum_{i=1}^{N-1} \sum_{j=i+1}^{N} ar_{ij}^{-k}
             # Note that the total interaction energy is just the sum of the interaction
@@ -248,13 +263,14 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
         if self.coords_method == 'random':
             self.coords = (0.5 - np.random.rand(self.N_particles, self.dimension)) * self.box_length  # initial coordinates
         elif self.coords_method == 'lattice':
+            N = np.ceil((self.N_particles)**(1 / self.dimension))      # number of grids per side of the lattice
             r_min = -self.box_length / 2
             r_max = self.box_length / 2
-            d = self.box_length / (self.N_particles)**(1/self.dimension)
-            pos = np.linspace(r_min + 0.5 *d, r_max - 0.5 *d, int((self.N_particles)**(1/self.dimension)))
-            coords_list = list(product(pos, repeat=self.dimension))         
+            self.d = self.box_length / N   # initial spacing between particles
+            pos = np.linspace(r_min + 0.5 * self.d, r_max - 0.5 * self.d, int(N))
+            coords_list = list(product(pos, repeat=self.dimension))    # length is larger or equil to self.coords     
             self.coords = np.zeros([self.N_particles, self.dimension])
-            for i in range(len(coords_list)):
+            for i in range(len(self.coords)):
                 self.coords[i] = list(coords_list[i])
         else:
             print('Error: The method for initializing the coordinates should be either "random" or "lattice".')
@@ -265,7 +281,18 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
             self.velocities = np.random.rand(
                 self.N_particles, self.dimension) * self.box_length * 0.1   # initial velocity
         elif self.velo_method == 'temp_rescale':
-            pass
+            self.velocities = 0.5 - np.random.rand(self.N_particles, self.dimension) * self.box_length * 0.1
+
+            mean_v, mean_v2 = [], []
+            v2 = np.power(self.velocities, 2)
+            for i in range(self.dimension):
+                mean_v.append(np.mean(self.velocities[:, i]))
+                mean_v2.append(np.mean(v2[:, i]))
+            mean_v, mean_v2 = np.array(mean_v), np.array(mean_v2)
+            f = np.sqrt(3 * self.temperature / mean_v2)        # scale factor of the velocities
+            # print(f)
+            self.velocities = (self.velocities - mean_v) * f
+            # print(self.velocities)            
         else:
             print('Error: The method for initializing the velocities should be either "random" or "temp_rescale".')
             sys.exit()
@@ -295,16 +322,33 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
             if self.dimension == 3:
                 outfile.write('z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
 
+        n=0
         for i in range(self.N_steps):
             #print('step: ', i)
             v_half = velocities + (self.dt / (2 * self.m)) * \
                 ComputeForces.total_force(self, coords)
             # coordinates updated (from t to t+dt)
             coords = coords + v_half * self.dt
-            if self.PBC == 'yes':
-                coords -= self.box_length * np.round(coords / self.box_length)
             velocities = v_half + (self.dt / (2 * self.m)) * \
                 ComputeForces.total_force(self, coords)
+
+            #k1 = copy.deepcopy(coords)
+            #if self.PBC == 'yes':
+            #    coords -= self.box_length * np.round(coords / self.box_length)
+            #k2 = copy.deepcopy(coords)
+
+            """
+            if (k1 != k2).any():
+                n+=1
+                print('n: ', n)
+                print('step: ', i)
+                print(k1[k1 != k2])
+                print('before: ', k1)
+                print('after: ', k2)
+            """
+            
+            
+            
             # note that self.total_force(coords) in the line above is the total force
             # at t+dt, since the coordiantes have been updated.
             output = self.output_data(i + 1, velocities, coords)
@@ -320,6 +364,8 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
                         outfile.write('z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
 
     def output_data(self, i, velocities, coords):
+        if self.PBC == 'yes':
+            coords -= self.box_length * np.round(coords / self.box_length)
         output = OrderedDict()
         output['Step'] = i
         output['Time'] = self.dt * (i)
@@ -327,8 +373,8 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
         output['E_k'] = float(0.5 * self.m * norm(velocities) ** 2)
         output['E_p'] = float(self.total_potential(coords))
         output['E_total'] = float(output['E_k'] + output['E_p'])
-        # Equilipartition theorem: <Ek> = (3/2)kT
-        output['Temp'] = float((2 * output['E_k']) / (3 * self.kb))
+        # Equilipartition theorem: <2Ek> = (3N-3)kT
+        output['Temp'] = float((2 * output['E_k']) / ((3 * self.N_particles - 3) *self.kb))
         output['L_total'] = float(self.angular_momentum(velocities, coords))
 
         return output
@@ -410,7 +456,7 @@ class MDAnalysis(MDParameters):
         for i in range(self.N_particles):
             plt.scatter(self.x[i], self.y[i], c=plt.cm.GnBu(
                 np.linspace(0, 1, len(self.time))))
-        plt.title('Trajectory of the particles')
+        plt.title('Trajectory of the particles in the x-y plane')
         plt.xlabel('x (nm)')
         plt.ylabel('y (nm)')
         #plt.xlim([-0.5 * self.box_length, 0.5 * self.box_length])
