@@ -58,7 +58,6 @@ class MDParameters:
             r_ij = coord_i - coord_j
             r_ij = r_ij - self.box_length * np.round(r_ij / self.box_length)
             dist = norm(r_ij)
-        dist = norm(coord_i - coord_j)
         return dist
 
 
@@ -92,9 +91,6 @@ class ComputeForces(MDParameters):
         return f_int
 
     def LJ_force_ij(self, coord_i, coord_j):
-        if self.PBC == 'yes':
-            coord_i -= self.box_length * np.round(coord_i / self.box_length)
-            coord_j -= self.box_length * np.round(coord_j / self.box_length)
         f_LJ = np.zeros([1, self.dimension])  # x and y (and z) components
         r_ij = MDParameters.calc_dist(self, coord_i, coord_j)
         r12 = (self.epsilon / r_ij) ** 12
@@ -203,9 +199,6 @@ class ComputePotentials(MDParameters):
         return p_int
 
     def LJ_potential(self, coord_i, coord_j):
-        if self.PBC == 'yes':
-            coord_i -= self.box_length * np.round(coord_i / self.box_length)
-            coord_j -= self.box_length * np.round(coord_j / self.box_length)
         r_ij = MDParameters.calc_dist(self, coord_i, coord_j)
         r12 = (self.epsilon / r_ij) ** 12
         r6 = (self.epsilon / r_ij) ** 6
@@ -325,17 +318,20 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
         n=0
         for i in range(self.N_steps):
             #print('step: ', i)
+            if self.PBC == 'yes':
+                coords -= self.box_length * np.round(coords / self.box_length)
             v_half = velocities + (self.dt / (2 * self.m)) * \
                 ComputeForces.total_force(self, coords)
             # coordinates updated (from t to t+dt)
             coords = coords + v_half * self.dt
-            velocities = v_half + (self.dt / (2 * self.m)) * \
-                ComputeForces.total_force(self, coords)
 
             #k1 = copy.deepcopy(coords)
-            #if self.PBC == 'yes':
-            #    coords -= self.box_length * np.round(coords / self.box_length)
+            if self.PBC == 'yes':
+                coords -= self.box_length * np.round(coords / self.box_length)
             #k2 = copy.deepcopy(coords)
+
+            velocities = v_half + (self.dt / (2 * self.m)) * \
+                ComputeForces.total_force(self, coords)
 
             """
             if (k1 != k2).any():
@@ -346,8 +342,7 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
                 print('before: ', k1)
                 print('after: ', k2)
             """
-            
-            
+
             
             # note that self.total_force(coords) in the line above is the total force
             # at t+dt, since the coordiantes have been updated.
@@ -442,7 +437,7 @@ class MDAnalysis(MDParameters):
 
     def plot_energy(self):
         plt.figure()
-        x = self.time
+        x = self.time / self.dt
         plt.plot(x, np.array(self.E_k) / self.N_particles, label='Kinetic energy')
         plt.plot(x, np.array(self.E_p) / self.N_particles, label='Potential energy')
         plt.plot(x, np.array(self.E_total) / self.N_particles, label='Total energy')
@@ -459,8 +454,8 @@ class MDAnalysis(MDParameters):
         plt.title('Trajectory of the particles in the x-y plane')
         plt.xlabel('x (nm)')
         plt.ylabel('y (nm)')
-        #plt.xlim([-0.5 * self.box_length, 0.5 * self.box_length])
-        #plt.ylim([-0.5 * self.box_length, 0.5 * self.box_length])
+        plt.xlim([-0.5 * self.box_length, 0.5 * self.box_length])
+        plt.ylim([-0.5 * self.box_length, 0.5 * self.box_length])
         plt.gca().set_aspect('equal', adjustable='box')
         plt.grid()
 
