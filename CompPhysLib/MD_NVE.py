@@ -4,6 +4,7 @@ import yaml
 import copy
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.stats import maxwell
 from numpy.linalg import norm
 from collections import OrderedDict
 from itertools import combinations
@@ -34,21 +35,24 @@ def setup_yaml():
 setup_yaml()
 
 
-class MDParameters:
-    def __init__(self, mdp):
-        with open(mdp) as ymlfile:
-            self.mdp = yaml.load(ymlfile)
+class Parameters:
+    def __init__(self, param):
+        with open(param) as ymlfile:
+            self.param = yaml.load(ymlfile)
 
-        for attr in self.mdp:
-            setattr(self, attr, self.mdp[attr])
+        for attr in self.param:
+            setattr(self, attr, self.param[attr])
 
         self.kb = 1  # Boltzmann constant
 
-        if 'box_length' not in self.mdp and 'rho' not in self.mdp:
+        if 'box_length' not in self.param and 'rho' not in self.param:
             print('Error: At least one of the the length of the box or particle density should be specified.')
             sys.exit()
-        if 'box_length' not in self.mdp and 'rho' in self.mdp:
+        if 'box_length' not in self.param and 'rho' in self.param:
             self.box_length = (self.N_particles / self.rho) ** (1 / 3)
+
+        self.param_name = param
+        self.traj_name = param.split('.')[0] + '_traj.yml'
         
 
     def calc_dist(self, coord_i, coord_j):
@@ -58,12 +62,13 @@ class MDParameters:
             r_ij = coord_i - coord_j
             r_ij = r_ij - self.box_length * np.round(r_ij / self.box_length)
             dist = norm(r_ij)
+
         return dist
 
 
-class ComputeForces(MDParameters):
-    def __init__(self, mdp):
-        MDParameters.__init__(self, mdp)
+class ComputeForces(Parameters):
+    def __init__(self, param):
+        Parameters.__init__(self, param)
 
     def external_force_i(self, coord_i):
         """
@@ -72,7 +77,7 @@ class ComputeForces(MDParameters):
         """
         f_ext = np.zeros([1, self.dimension])  # x and y (and z) components
         origin = np.zeros([1, self.dimension])
-        r_i = MDParameters.calc_dist(self, coord_i, origin)
+        r_i = Parameters.calc_dist(self, coord_i, origin)
         f_ext[:] = - self.u * self.n * coord_i[:] * r_i ** (self.n - 2)
 
         return f_ext
@@ -84,19 +89,33 @@ class ComputeForces(MDParameters):
         np.array([ak(xi-xj)rij^{-k-2}, ak(yi-yj)rij^{-k-2}])
         """
         f_int = np.zeros([1, self.dimension])  # x and y (and z) components
-        r_ij = MDParameters.calc_dist(self, coord_i, coord_j)
-        f_int[:] = self.a * self.k * \
-            (coord_i - coord_j) * r_ij ** (-self.k - 2)
+        r_ij = Parameters.calc_dist(self, coord_i, coord_j)
+
+        # Here we define that r_0 means no energy trunaction is used
+        if r_ij < self.r_c or self.r_c == 0:
+            f_int[:] = self.a * self.k * (coord_i - coord_j) * r_ij ** (-self.k - 2)
+        else:
+            pass # so f_int = np.zeros([1, self.dimension])
+        #f_int[:] = self.a * self.k * (coord_i - coord_j) * r_ij ** (-self.k - 2)
 
         return f_int
 
     def LJ_force_ij(self, coord_i, coord_j):
         f_LJ = np.zeros([1, self.dimension])  # x and y (and z) components
-        r_ij = MDParameters.calc_dist(self, coord_i, coord_j)
-        r12 = (self.epsilon / r_ij) ** 12
-        r6 = (self.epsilon / r_ij) ** 6
-        f_LJ[:] = (coord_i - coord_j) * (48 * self.epsilon / (r_ij ** 2)) * (r12 - 0.5 * r6)
-        #print('f_LJ: ', f_LJ)
+        r_ij = Parameters.calc_dist(self, coord_i, coord_j)
+
+        # Here we define that r_0 means no energy trunaction is used
+        if r_ij < self.r_c or self.r_c == 0:
+            r12 = (self.epsilon / r_ij) ** 12
+            r6 = (self.epsilon / r_ij) ** 6
+            rij_vec = (coord_i - coord_j) 
+            rij_vec -= self.box_length * np.round(rij_vec / self.box_length)
+            #f_LJ[:] = (coord_i - coord_j) * (48 * self.epsilon / (r_ij ** 2)) * (r12 - 0.5 * r6)
+            f_LJ[:] = rij_vec * (48 * self.epsilon / (r_ij ** 2)) * (r12 - 0.5 * r6)
+        
+        else:
+            pass  # so f_LJ = np.zeros([1, self.dimension])
+
         return f_LJ
 
     def total_force(self, coords):
@@ -174,39 +193,47 @@ class ComputeForces(MDParameters):
         return norm(L_total)
 
 
-class ComputePotentials(MDParameters):
-    def __init__(self, mdp):
-        MDParameters.__init__(self, mdp)
+class ComputePotentials(Parameters):
+    def __init__(self, param):
+        Parameters.__init__(self, param)
 
     def external_potential_i(self, coord_i):
         origin = np.zeros([1, self.dimension])
-        r_i = MDParameters.calc_dist(self, coord_i, origin)
+        r_i = Parameters.calc_dist(self, coord_i, origin)
         p_ext = self.u * r_i ** self.n
 
         return p_ext
 
     def interaction_potential(self, coord_i, coord_j):
-        r_ij = MDParameters.calc_dist(self, coord_i, coord_j)
-        if self.r_c == 0:
-            # Here we define that r_0 means no energy trunaction is used
+        r_ij = Parameters.calc_dist(self, coord_i, coord_j)
+
+        # Here we define that r_0 means no energy trunaction is used
+        if r_ij < self.r_c or self.r_c == 0:
             p_int = self.a * r_ij ** (-self.k)
+            if self.shift_energy == 'yes':
+                pc_int = self.a * self.r_c ** (-self.k)
+                p_int -= pc_int
         else:
-            if r_ij < self.r_c:
-                p_int = self.a * r_ij ** (-self.k)
-            else:
-                p_int = 0
+            p_int = 0
 
         return p_int
 
     def LJ_potential(self, coord_i, coord_j):
-        r_ij = MDParameters.calc_dist(self, coord_i, coord_j)
-        r12 = (self.epsilon / r_ij) ** 12
-        r6 = (self.epsilon / r_ij) ** 6
-        p_LJ = 4 * self.epsilon * (r12 - r6)
-        #print('r_ij: ', r_ij)
-        #print('r12: ', r12)
-        #print('r6: ', r6)
-        #print('p_LJ: ', p_LJ, '\n')
+        r_ij = Parameters.calc_dist(self, coord_i, coord_j)
+
+        # Here we define that r_0 means no energy trunaction is used
+        if r_ij < self.r_c or self.r_c == 0:
+            r12 = (self.epsilon / r_ij) ** 12
+            r6 = (self.epsilon / r_ij) ** 6
+            p_LJ = 4 * self.epsilon * (r12 - r6)
+
+            if self.shift_energy == 'yes':
+                rc12 = (self.epsilon / self.r_c) ** 12
+                rc6 = (self.epsilon / self.r_c) ** 6
+                pc_LJ = 4 * self.epsilon * (rc12 - rc6)
+                p_LJ -= pc_LJ
+        else:
+            p_LJ = 0
 
         return p_LJ
 
@@ -247,10 +274,9 @@ class ComputePotentials(MDParameters):
 
         return p_total
 
-
 class MolecularDynamics(ComputeForces, ComputePotentials):
-    def __init__(self, mdp):
-        MDParameters.__init__(self, mdp)
+    def __init__(self, param):
+        Parameters.__init__(self, param)
 
         # initial coordinates
         if self.coords_method == 'random':
@@ -272,9 +298,14 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
         # initial velocities
         if self.velo_method == 'random':
             self.velocities = np.random.rand(
-                self.N_particles, self.dimension) * self.box_length * 0.1   # initial velocity
+                self.N_particles, self.dimension) * self.box_length * 0.1  # initial velocity
+        
         elif self.velo_method == 'temp_rescale':
-            self.velocities = 0.5 - np.random.rand(self.N_particles, self.dimension) * self.box_length * 0.1
+            # reference: http://www.cchem.berkeley.edu/chem195/_l_j___andersen_thermostat_8m.html
+            # set initial velocities to random number
+            sigma = np.sqrt(self.temperature / self.m)
+            self.velocities = np.random.normal(scale=sigma, size=[self.N_particles, self.dimension])
+            # self.velocities = 0.5 - np.random.rand(self.N_particles, self.dimension) * self.box_length * 0.1
 
             mean_v, mean_v2 = [], []
             v2 = np.power(self.velocities, 2)
@@ -282,10 +313,12 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
                 mean_v.append(np.mean(self.velocities[:, i]))
                 mean_v2.append(np.mean(v2[:, i]))
             mean_v, mean_v2 = np.array(mean_v), np.array(mean_v2)
-            f = np.sqrt(3 * self.temperature / mean_v2)        # scale factor of the velocities
-            # print(f)
+            f = np.sqrt(self.dimension * self.temperature / mean_v2 )        # scale factor of the velocities
+            
+            # (self.velocities - mean_v): set initial momentum to 0
+            # multiply by f: set initial kinetic energy to 1.5kbT (in 3D)
             self.velocities = (self.velocities - mean_v) * f
-            # print(self.velocities)            
+
         else:
             print('Error: The method for initializing the velocities should be either "random" or "temp_rescale".')
             sys.exit()
@@ -299,14 +332,14 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
         """
 
         for file in os.listdir('.'):
-            if file == 'MD_traj.yml':
+            if file == self.traj_name:
                 # make the the output file is newly made
-                os.remove('MD_traj.yml')
+                os.remove(self.traj_name)
 
         # quantities at t = 0
         output0 = self.output_data(0, velocities, coords)
 
-        with open('MD_traj.yml', 'a+', newline='') as outfile:
+        with open(self.traj_name, 'a+', newline='') as outfile:
             outfile.write('# Output data of MD simulation\n')
             yaml.dump(output0, outfile, default_flow_style=False)
             coords_list = coords.tolist()  # to prevent line breaks when printing to the file
@@ -333,22 +366,12 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
             velocities = v_half + (self.dt / (2 * self.m)) * \
                 ComputeForces.total_force(self, coords)
 
-            """
-            if (k1 != k2).any():
-                n+=1
-                print('n: ', n)
-                print('step: ', i)
-                print(k1[k1 != k2])
-                print('before: ', k1)
-                print('after: ', k2)
-            """
-
             
             # note that self.total_force(coords) in the line above is the total force
             # at t+dt, since the coordiantes have been updated.
             output = self.output_data(i + 1, velocities, coords)
 
-            with open('MD_traj.yml', 'a+', newline='') as outfile:
+            with open(self.traj_name, 'a+', newline='') as outfile:
                 if i % self.print_freq == self.print_freq - 1:
                     outfile.write("\n")
                     yaml.dump(output, outfile, default_flow_style=False)
@@ -375,10 +398,10 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
         return output
 
 
-class MDAnalysis(MDParameters):
-    def __init__(self, mdp, traj):
+class MDAnalysis(Parameters):
+    def __init__(self, param, traj):
         np.set_printoptions(suppress=True)
-        MDParameters.__init__(self, mdp)
+        Parameters.__init__(self, param)
         self.step, self.time, self.E_k, self.E_p = [], [], [], []
         self.E_total, self.temp, self.L = [], [], []
         self.x = np.zeros([self.N_particles, int(
@@ -421,6 +444,12 @@ class MDAnalysis(MDParameters):
                     self.z[i][len(self.time) - 1] = float(l.split(':')
                                                           [1].split('[')[1].split(']')[0].split(',')[i])
 
+    def calculate_RMSF(self, E_total):
+        E_avg = np.mean(E_total)
+        E2_avg = np.mean(np.power(E_total, 2))
+        RMSF = np.sqrt((E2_avg - E_avg ** 2)) / E_avg
+
+        return RMSF
             
 
     def plot_2d(self, y, y_name, y_unit=None):
@@ -437,7 +466,7 @@ class MDAnalysis(MDParameters):
 
     def plot_energy(self):
         plt.figure()
-        x = self.time / self.dt
+        x = np.arange(self.N_steps + 1)
         plt.plot(x, np.array(self.E_k) / self.N_particles, label='Kinetic energy')
         plt.plot(x, np.array(self.E_p) / self.N_particles, label='Potential energy')
         plt.plot(x, np.array(self.E_total) / self.N_particles, label='Total energy')

@@ -15,7 +15,7 @@ sigma: 1    # signma in LJ potential
 print_freq: 1
 dimension: 2
 potential: 'LJ'
-PBC: 'no'
+PBC: 'yes'
 coords_method: 'lattice'  
 velo_method: 'random'
 

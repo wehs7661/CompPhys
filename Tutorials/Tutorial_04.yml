@@ -1,0 +1,17 @@
+# Molecular dynamics simulation parameters
+N_particles: 4
+N_steps: 1000
+dt: 0.001
+m: 1
+r_c: 2.5 # the distance cutoff for the interaction potential (r_c = 0 : no truncation)
+box_length: 3
+epsilon: 1  # epsilon in LJ potential
+sigma: 1    # signma in LJ potential
+
+print_freq: 1
+dimension: 2
+potential: 'LJ'
+PBC: 'yes'
+coords_method: 'lattice'  
+velo_method: 'random'
+shift_energy: 'yes'
