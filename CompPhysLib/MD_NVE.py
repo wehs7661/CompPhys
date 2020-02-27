@@ -35,7 +35,7 @@ def setup_yaml():
 setup_yaml()
 
 
-class Parameters:
+class Initialization:
     def __init__(self, param):
         with open(param) as ymlfile:
             self.param = yaml.load(ymlfile)
@@ -43,17 +43,134 @@ class Parameters:
         for attr in self.param:
             setattr(self, attr, self.param[attr])
 
-        self.kb = 1  # Boltzmann constant
+        # Step 1: Examine the simulation parameters
+        # parameters that must be specified i the parameter file
+        self.examine_params('simulation', True)
+        self.examine_params('N_particles', True)
+        self.examine_params('N_steps', True)
+        self.examine_params('potential', True)
+
+        if self.simulation != 'MC' and self.simulation != 'MD':
+            print('Error: The simulation should be either MC or MD.')
+            sys.exit()
+
+        if self.potential == 'central':
+            self.examine_params('n', True)
+            self.examine_params('u', True)
+            self.examine_params('k', True)
+            self.examine_params('a', True)
+
+        if self.simulation == 'MC':
+            self.examine_params('max_d', True)
+
+        # some special cases
+        if self.simulation == 'MC' or (self.simulation == 'MD' and self.velo_method == 'temp_rescale'):
+            # temeprature must be specified in an NVT MC simulation or if temp_rescale is used
+            self.examine_params('temperature', True)
+
+        if self.simulation == 'MD':
+            if 'temperature' not in self.param:
+                self.velo_method = 'random'
+            self.examine_params('velo_method', False, 'random')
 
         if 'box_length' not in self.param and 'rho' not in self.param:
             print('Error: At least one of the the length of the box or particle density should be specified.')
             sys.exit()
+
         if 'box_length' not in self.param and 'rho' in self.param:
+            # only if box_legth is not specificed is rho activated
             self.box_length = (self.N_particles / self.rho) ** (1 / 3)
 
-        self.param_name = param
-        self.traj_name = param.split('.')[0] + '_traj.yml'
+        # assign defaults to non-specified paramters
+        if self.simulation == 'MD':
+            self.examine_params('dt', False, 0.01)
         
+        if self.potential == 'LJ':
+            self.examine_params('epsilon', False, 1)
+            self.examine_params('sigma', False, 1)
+
+        self.examine_params('print_freq', False, 1)
+        self.examine_params('dimension', False, 3)
+        self.examine_params('coords_method', False, 'random')
+        self.examine_params('PBC', False, 'yes')
+        self.examine_params('m', False, 1)
+        self.examine_params('kb', False, 1)
+        self.examine_params('energy_truncation', False, 'no')
+        self.examine_params('shift_energy', False, 'no')
+
+        if self.energy_truncation == 'yes':
+            self.examine_params('r_c', False, 0.5 * self.box_length)
+
+        # Step 2: Print the adopted parameters to a yaml file
+        adopted_params = copy.deepcopy(vars(self))
+        del adopted_params['param']
+        out_param_name = param.split('.')[0] + '_adopted_params.yml'
+
+        for file in os.listdir('.'):
+            if file == out_param_name:
+                # make the the output file is newly made
+                os.remove(out_param_name)
+
+        with open(out_param_name, 'a+', newline='') as out_params:
+            out_params.write('# Adopted simulation parameters\n')
+            yaml.dump(adopted_params, out_params, default_flow_style=False)
+
+        # Step 3: Add other attributes
+        self.prefix = param.split('.')[0]
+        self.traj_name = self.prefix + '_traj.yml'
+
+    def examine_params(self, var: str, required=False, default=None):
+        if required is True:
+            if var not in self.param:
+                print('Error: Parameter "%s" must be specified!' % var)
+                sys.exit()
+        else:
+            if var not in self.param:
+                setattr(self, var, default)
+
+    def init_coords(self):
+        if self.coords_method == 'random':
+            self.coords = (0.5 - np.random.rand(self.N_particles, self.dimension)) * self.box_length  # initial coordinates
+        elif self.coords_method == 'lattice':
+            N = np.ceil((self.N_particles)**(1 / self.dimension))      # number of grids per side of the lattice
+            r_min = -self.box_length / 2
+            r_max = self.box_length / 2
+            self.d = self.box_length / N   # initial spacing between particles
+            pos = np.linspace(r_min + 0.5 * self.d, r_max - 0.5 * self.d, int(N))
+            coords_list = list(product(pos, repeat=self.dimension))    # length is larger or equil to self.coords     
+            self.coords = np.zeros([self.N_particles, self.dimension])
+            for i in range(len(self.coords)):
+                self.coords[i] = list(coords_list[i])
+        else:
+            print('Error: The method for initializing the coordinates should be either "random" or "lattice".')
+            sys.exit()
+    
+    def init_velo(self):
+        if self.velo_method == 'random':
+            self.velocities = np.random.rand(
+                self.N_particles, self.dimension) * self.box_length * 0.1  # initial velocity
+        
+        elif self.velo_method == 'temp_rescale':
+            # reference: http://www.cchem.berkeley.edu/chem195/_l_j___andersen_thermostat_8m.html
+            # set initial velocities to random number
+            sigma = np.sqrt(self.temperature / self.m)
+            self.velocities = np.random.normal(scale=sigma, size=[self.N_particles, self.dimension])
+
+            mean_v, mean_v2 = [], []
+            v2 = np.power(self.velocities, 2)
+            for i in range(self.dimension):
+                mean_v.append(np.mean(self.velocities[:, i]))
+                mean_v2.append(np.mean(v2[:, i]))
+            mean_v, mean_v2 = np.array(mean_v), np.array(mean_v2)
+            f = np.sqrt(self.dimension * self.temperature / mean_v2 )        # scale factor of the velocities
+            
+            # (self.velocities - mean_v): set initial momentum to 0
+            # multiply by f: set initial kinetic energy to 1.5kbT (in 3D)
+            self.velocities = (self.velocities - mean_v) * f
+
+        else:
+            print('Error: The method for initializing the velocities should be either "random" or "temp_rescale".')
+            sys.exit()
 
     def calc_dist(self, coord_i, coord_j):
         if self.PBC == 'no':
@@ -66,9 +183,9 @@ class Parameters:
         return dist
 
 
-class ComputeForces(Parameters):
+class ComputeForces(Initialization):
     def __init__(self, param):
-        Parameters.__init__(self, param)
+        Initialization.__init__(self, param)
 
     def external_force_i(self, coord_i):
         """
@@ -77,7 +194,7 @@ class ComputeForces(Parameters):
         """
         f_ext = np.zeros([1, self.dimension])  # x and y (and z) components
         origin = np.zeros([1, self.dimension])
-        r_i = Parameters.calc_dist(self, coord_i, origin)
+        r_i = Initialization.calc_dist(self, coord_i, origin)
         f_ext[:] = - self.u * self.n * coord_i[:] * r_i ** (self.n - 2)
 
         return f_ext
@@ -89,10 +206,10 @@ class ComputeForces(Parameters):
         np.array([ak(xi-xj)rij^{-k-2}, ak(yi-yj)rij^{-k-2}])
         """
         f_int = np.zeros([1, self.dimension])  # x and y (and z) components
-        r_ij = Parameters.calc_dist(self, coord_i, coord_j)
+        r_ij = Initialization.calc_dist(self, coord_i, coord_j)
 
         # Here we define that r_0 means no energy trunaction is used
-        if r_ij < self.r_c or self.r_c == 0:
+        if (self.energy_truncation == 'yes' and r_ij < self.r_c) or (self.energy_truncation == 'no'):
             f_int[:] = self.a * self.k * (coord_i - coord_j) * r_ij ** (-self.k - 2)
         else:
             pass # so f_int = np.zeros([1, self.dimension])
@@ -102,15 +219,14 @@ class ComputeForces(Parameters):
 
     def LJ_force_ij(self, coord_i, coord_j):
         f_LJ = np.zeros([1, self.dimension])  # x and y (and z) components
-        r_ij = Parameters.calc_dist(self, coord_i, coord_j)
+        r_ij = Initialization.calc_dist(self, coord_i, coord_j)
 
         # Here we define that r_0 means no energy trunaction is used
-        if r_ij < self.r_c or self.r_c == 0:
+        if (self.energy_truncation == 'yes' and r_ij < self.r_c) or (self.energy_truncation == 'no'):
             r12 = (self.epsilon / r_ij) ** 12
             r6 = (self.epsilon / r_ij) ** 6
             rij_vec = (coord_i - coord_j) 
             rij_vec -= self.box_length * np.round(rij_vec / self.box_length)
-            #f_LJ[:] = (coord_i - coord_j) * (48 * self.epsilon / (r_ij ** 2)) * (r12 - 0.5 * r6)
             f_LJ[:] = rij_vec * (48 * self.epsilon / (r_ij ** 2)) * (r12 - 0.5 * r6)
         
         else:
@@ -193,22 +309,22 @@ class ComputeForces(Parameters):
         return norm(L_total)
 
 
-class ComputePotentials(Parameters):
+class ComputePotentials(Initialization):
     def __init__(self, param):
-        Parameters.__init__(self, param)
+        Initialization.__init__(self, param)
 
     def external_potential_i(self, coord_i):
         origin = np.zeros([1, self.dimension])
-        r_i = Parameters.calc_dist(self, coord_i, origin)
+        r_i = Initialization.calc_dist(self, coord_i, origin)
         p_ext = self.u * r_i ** self.n
 
         return p_ext
 
     def interaction_potential(self, coord_i, coord_j):
-        r_ij = Parameters.calc_dist(self, coord_i, coord_j)
+        r_ij = Initialization.calc_dist(self, coord_i, coord_j)
 
         # Here we define that r_0 means no energy trunaction is used
-        if r_ij < self.r_c or self.r_c == 0:
+        if (self.energy_truncation == 'yes' and r_ij < self.r_c) or (self.energy_truncation == 'no'):
             p_int = self.a * r_ij ** (-self.k)
             if self.shift_energy == 'yes':
                 pc_int = self.a * self.r_c ** (-self.k)
@@ -219,10 +335,9 @@ class ComputePotentials(Parameters):
         return p_int
 
     def LJ_potential(self, coord_i, coord_j):
-        r_ij = Parameters.calc_dist(self, coord_i, coord_j)
+        r_ij = Initialization.calc_dist(self, coord_i, coord_j)
 
-        # Here we define that r_0 means no energy trunaction is used
-        if r_ij < self.r_c or self.r_c == 0:
+        if (self.energy_truncation == 'yes' and r_ij < self.r_c) or (self.energy_truncation == 'no'):
             r12 = (self.epsilon / r_ij) ** 12
             r6 = (self.epsilon / r_ij) ** 6
             p_LJ = 4 * self.epsilon * (r12 - r6)
@@ -274,54 +389,93 @@ class ComputePotentials(Parameters):
 
         return p_total
 
+class MonteCarlo(ComputePotentials):
+    def __init__(self, param):
+        Initialization.__init__(self, param)
+        Initialization.init_coords(self)
+
+    def metropolis_algrtm(self, coords):
+        for file in os.listdir('.'):
+            if file == self.traj_name:
+                # make the the output file is newly made
+                os.remove(self.traj_name)
+
+        # quantities at t = 0
+        output0 = self.output_data(0, coords)
+        with open(self.traj_name, 'a+', newline='') as outfile:
+            outfile.write('# Output data of MC simulation\n')
+            yaml.dump(output0, outfile, default_flow_style=False)
+            coords_list = coords.tolist()  # to prevent line breaks when printing to the file
+            outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+            outfile.write('y-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+            if self.dimension == 3:
+                outfile.write('z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+
+        n_accept = 0   # for calculating the average acceptace probability
+
+        for i in range(self.N_steps):
+            E_current = self.total_potential(coords)  # coords: current coordinates
+
+            # pick a particle, decide the random displacement and proposed new coordinates
+            i_particle = np.random.randint(self.N_particles)  # selected particle
+            d = (2 *np.random.rand(3) - 1) * self.max_d
+            coords_proposed = copy.deepcopy(coords)
+            coords_proposed[i_particle] += d
+            if self.PBC == 'yes':
+                coords_proposed -= self.box_length * np.round(coords_proposed / self.box_length)
+            
+            # Caculate the acceptance ratio based on the energy difference
+            E_proposed = self.total_potential(coords_proposed)
+            delta_E = E_proposed - E_current
+            beta = 1 / self.temperature
+            p_acc = np.exp(-beta * delta_E)
+
+            # metropolis-hasting algorithm
+            if delta_E < 0:
+                n_accept += 1
+                E_current += delta_E   # so now E_current = E_proposed
+                coords[i_particle] += d
+                if self.PBC == 'yes':
+                    coords -= self.box_length * np.round(coords / self.box_length)
+            else:
+                if np.random.rand() < p_acc:
+                    n_accept += 1
+                    E_current += delta_E   # so now E_current = E_proposed
+                    coords[i_particle] += d
+                    if self.PBC == 'yes':
+                        coords -= self.box_length * np.round(coords / self.box_length)
+                else:
+                    pass  # so the coordinates and the energy remain the same
+
+            # print the trajectory data
+            output = self.output_data(i + 1, coords)
+            with open(self.traj_name, 'a+', newline='') as outfile:
+                if i % self.print_freq == self.print_freq - 1:
+                    outfile.write("\n")
+                    yaml.dump(output, outfile, default_flow_style=False)
+                    coords_list = coords.tolist()  # to prevent line breaks when printing to the file
+                    outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                    outfile.write('y-coordinates: ' + str([coords_list[i][1] for i in range(len(coords_list))]) + '\n')
+                    if self.dimension == 3:
+                        outfile.write('z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
+
+        self.acc_rate = n_accept / self.N_steps
+
+    def output_data(self, i, coords):
+        if self.PBC == 'yes':
+            coords -= self.box_length * np.round(coords / self.box_length)
+        output = OrderedDict()
+        output['Step'] = i
+        output['E_total'] = float(self.total_potential(coords))  # E_total = E_p
+
+        return output
+
+
 class MolecularDynamics(ComputeForces, ComputePotentials):
     def __init__(self, param):
-        Parameters.__init__(self, param)
-
-        # initial coordinates
-        if self.coords_method == 'random':
-            self.coords = (0.5 - np.random.rand(self.N_particles, self.dimension)) * self.box_length  # initial coordinates
-        elif self.coords_method == 'lattice':
-            N = np.ceil((self.N_particles)**(1 / self.dimension))      # number of grids per side of the lattice
-            r_min = -self.box_length / 2
-            r_max = self.box_length / 2
-            self.d = self.box_length / N   # initial spacing between particles
-            pos = np.linspace(r_min + 0.5 * self.d, r_max - 0.5 * self.d, int(N))
-            coords_list = list(product(pos, repeat=self.dimension))    # length is larger or equil to self.coords     
-            self.coords = np.zeros([self.N_particles, self.dimension])
-            for i in range(len(self.coords)):
-                self.coords[i] = list(coords_list[i])
-        else:
-            print('Error: The method for initializing the coordinates should be either "random" or "lattice".')
-            sys.exit()
-        
-        # initial velocities
-        if self.velo_method == 'random':
-            self.velocities = np.random.rand(
-                self.N_particles, self.dimension) * self.box_length * 0.1  # initial velocity
-        
-        elif self.velo_method == 'temp_rescale':
-            # reference: http://www.cchem.berkeley.edu/chem195/_l_j___andersen_thermostat_8m.html
-            # set initial velocities to random number
-            sigma = np.sqrt(self.temperature / self.m)
-            self.velocities = np.random.normal(scale=sigma, size=[self.N_particles, self.dimension])
-            # self.velocities = 0.5 - np.random.rand(self.N_particles, self.dimension) * self.box_length * 0.1
-
-            mean_v, mean_v2 = [], []
-            v2 = np.power(self.velocities, 2)
-            for i in range(self.dimension):
-                mean_v.append(np.mean(self.velocities[:, i]))
-                mean_v2.append(np.mean(v2[:, i]))
-            mean_v, mean_v2 = np.array(mean_v), np.array(mean_v2)
-            f = np.sqrt(self.dimension * self.temperature / mean_v2 )        # scale factor of the velocities
-            
-            # (self.velocities - mean_v): set initial momentum to 0
-            # multiply by f: set initial kinetic energy to 1.5kbT (in 3D)
-            self.velocities = (self.velocities - mean_v) * f
-
-        else:
-            print('Error: The method for initializing the velocities should be either "random" or "temp_rescale".')
-            sys.exit()
+        Initialization.__init__(self, param)
+        Initialization.init_coords(self)
+        Initialization.init_velo(self)
 
     def verlet_integration(self, velocities, coords):
         """
@@ -348,29 +502,21 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
             if self.dimension == 3:
                 outfile.write('z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
 
-        n=0
         for i in range(self.N_steps):
-            #print('step: ', i)
             if self.PBC == 'yes':
                 coords -= self.box_length * np.round(coords / self.box_length)
             v_half = velocities + (self.dt / (2 * self.m)) * \
                 ComputeForces.total_force(self, coords)
-            # coordinates updated (from t to t+dt)
-            coords = coords + v_half * self.dt
-
-            #k1 = copy.deepcopy(coords)
+            coords = coords + v_half * self.dt  # coordinates updated (from t to t+dt)
             if self.PBC == 'yes':
                 coords -= self.box_length * np.round(coords / self.box_length)
-            #k2 = copy.deepcopy(coords)
-
             velocities = v_half + (self.dt / (2 * self.m)) * \
                 ComputeForces.total_force(self, coords)
-
             
             # note that self.total_force(coords) in the line above is the total force
-            # at t+dt, since the coordiantes have been updated.
+            # at t+dt, since the coordiantes have been updated.\
+            
             output = self.output_data(i + 1, velocities, coords)
-
             with open(self.traj_name, 'a+', newline='') as outfile:
                 if i % self.print_freq == self.print_freq - 1:
                     outfile.write("\n")
@@ -398,12 +544,16 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
         return output
 
 
-class MDAnalysis(Parameters):
+class TrajAnalysis(Initialization):
     def __init__(self, param, traj):
         np.set_printoptions(suppress=True)
-        Parameters.__init__(self, param)
-        self.step, self.time, self.E_k, self.E_p = [], [], [], []
-        self.E_total, self.temp, self.L = [], [], []
+        Initialization.__init__(self, param)
+    
+        if self.simulation == 'MD':
+            self.time, self.E_k, self.E_p, self.temp, self.L = [], [], [], [], []
+
+        # The following are documented in traj.yml for both MC and MD
+        self.step, self.E_total = [], []
         self.x = np.zeros([self.N_particles, int(
             np.ceil(self.N_steps / self.print_freq)) + 1])
         self.y = np.zeros([self.N_particles, int(
@@ -433,15 +583,15 @@ class MDAnalysis(Parameters):
             
             if 'x-coordinates: ' in l:
                 for i in range(self.N_particles):
-                    self.x[i][len(self.time) - 1] = float(l.split(':')[1].split('[')[1].split(']')[0].split(',')[i])
+                    self.x[i][len(self.step) - 1] = float(l.split(':')[1].split('[')[1].split(']')[0].split(',')[i])
             if 'y-coordinates: ' in l:
                 for i in range(self.N_particles):
-                    self.y[i][len(self.time) - 1] = float(l.split(':')
+                    self.y[i][len(self.step) - 1] = float(l.split(':')
                                                           [1].split('[')[1].split(']')[0].split(',')[i])
             if 'z-coordinates: ' in l:
                 # might not be used
                 for i in range(self.N_particles):
-                    self.z[i][len(self.time) - 1] = float(l.split(':')
+                    self.z[i][len(self.step) - 1] = float(l.split(':')
                                                           [1].split('[')[1].split(']')[0].split(',')[i])
 
     def calculate_RMSF(self, E_total):
@@ -452,19 +602,20 @@ class MDAnalysis(Parameters):
         return RMSF
             
 
-    def plot_2d(self, y, y_name, y_unit=None):
+    def plot_2d(self, y, y_name, truncate=0, y_unit=None):
         plt.figure()
-        x = self.time
-        plt.scatter(x, y)
-        plt.title('%s as a function of time' % y_name)
-        plt.xlabel('Time')
+        x = np.arange(self.N_steps + 1)[truncate:]
+        y = y[truncate:]
+        plt.plot(x, y)
+        plt.title('%s as a function of simulation step' % y_name)
+        plt.xlabel('Simulation step')
         if y_unit is None:
             plt.ylabel('%s ' % y_name)
         else:
             plt.ylabel('%s (%s)' % (y_name, y_unit))
         plt.grid()
 
-    def plot_energy(self):
+    def plot_MD_energy(self):
         plt.figure()
         x = np.arange(self.N_steps + 1)
         plt.plot(x, np.array(self.E_k) / self.N_particles, label='Kinetic energy')
@@ -479,7 +630,7 @@ class MDAnalysis(Parameters):
         plt.figure()
         for i in range(self.N_particles):
             plt.scatter(self.x[i], self.y[i], c=plt.cm.GnBu(
-                np.linspace(0, 1, len(self.time))))
+                np.linspace(0, 1, len(self.step))))
         plt.title('Trajectory of the particles in the x-y plane')
         plt.xlabel('x (nm)')
         plt.ylabel('y (nm)')
@@ -488,7 +639,7 @@ class MDAnalysis(Parameters):
         plt.gca().set_aspect('equal', adjustable='box')
         plt.grid()
 
-    def plot_all(self):
+    def plot_all_MD(self):
         self.plot_2d(self.E_k, 'Kinetic energy')
         self.plot_2d(self.E_p, 'Potential energy')
         self.plot_2d(self.E_total, 'Total energy')

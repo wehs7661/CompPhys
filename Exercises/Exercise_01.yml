@@ -1,0 +1,19 @@
+# Simulation parameters
+simulation: 'MC'
+N_particles: 50
+N_steps: 200
+print_freq: 1
+
+dimension: 3
+box_length: 3
+temperature: 1
+coords_method: 'random'
+PBC: 'yes'
+max_d: 0.5
+
+kb: 1
+m: 1   # the mass of the particles (all the same)
+potential: 'LJ'
+epsilon: 1  # epsilon in LJ potential
+sigma: 1    # signma in LJ potential
+energy_truncation: 'no'

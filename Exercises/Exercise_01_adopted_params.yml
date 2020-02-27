@@ -1,0 +1,18 @@
+# Adopted simulation parameters
+N_particles: 50
+N_steps: 200
+PBC: 'yes'
+box_length: 3
+coords_method: random
+dimension: 3
+energy_truncation: 'no'
+epsilon: 1
+kb: 1
+m: 1
+max_d: 0.5
+potential: LJ
+print_freq: 1
+shift_energy: 'no'
+sigma: 1
+simulation: MC
+temperature: 1
