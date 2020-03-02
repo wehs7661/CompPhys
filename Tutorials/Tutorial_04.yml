@@ -1,4 +1,5 @@
-# Molecular dynamics simulation parameters
+# Simulation parameters
+simulation: MD
 N_particles: 4
 N_steps: 1000
 dt: 0.001
@@ -14,4 +15,5 @@ potential: 'LJ'
 PBC: 'yes'
 coords_method: 'lattice'  
 velo_method: 'random'
+energy_truncation: 'yes'
 shift_energy: 'yes'

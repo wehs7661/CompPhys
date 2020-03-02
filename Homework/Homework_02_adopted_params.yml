@@ -1,6 +1,6 @@
 # Adopted simulation parameters
-N_particles: 8
-N_steps: 200
+N_particles: 125
+N_steps: 20000
 PBC: 'yes'
 box_length: 10
 coords_method: lattice

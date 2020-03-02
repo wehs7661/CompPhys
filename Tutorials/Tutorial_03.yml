@@ -1,4 +1,5 @@
-# Molecular dynamics simulation parameters
+# Simulation parameters
+simulation: MD
 N_particles: 4
 N_steps: 1000
 dt: 0.001
@@ -7,10 +8,8 @@ n: 2 # the order of the total external energy
 u: 1 # the coefficient of the total external energy
 k: 6 # the order of the pairwise potential 
 a: 1 # the coefficient of pariwise potential
-r_c: 0 # the distance cutoff for the interaction potential (r_c = 0 : no truncation)
+r_c: 0 # the distance cutoff for the interaction potential
 box_length: 3
-epsilon: 1  # epsilon in LJ potential
-sigma: 1    # signma in LJ potential
 
 print_freq: 1
 dimension: 2
@@ -19,4 +18,5 @@ PBC: 'no'
 coords_method: 'lattice'  
 velo_method: 'random'
 shift_energy: 'no'
+energy_truncation: 'yes'
 

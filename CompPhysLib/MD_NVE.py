@@ -163,10 +163,10 @@ class Initialization:
                 mean_v2.append(np.mean(v2[:, i]))
             mean_v, mean_v2 = np.array(mean_v), np.array(mean_v2)
             f = np.sqrt(self.dimension * self.temperature / mean_v2 )        # scale factor of the velocities
-            
             # (self.velocities - mean_v): set initial momentum to 0
             # multiply by f: set initial kinetic energy to 1.5kbT (in 3D)
             self.velocities = (self.velocities - mean_v) * f
+            self.velocities = np.random.normal(scale=sigma, size=[self.N_particles, self.dimension])
 
         else:
             print('Error: The method for initializing the velocities should be either "random" or "temp_rescale".')
@@ -213,7 +213,7 @@ class ComputeForces(Initialization):
             f_int[:] = self.a * self.k * (coord_i - coord_j) * r_ij ** (-self.k - 2)
         else:
             pass # so f_int = np.zeros([1, self.dimension])
-        #f_int[:] = self.a * self.k * (coord_i - coord_j) * r_ij ** (-self.k - 2)
+        f_int[:] = self.a * self.k * (coord_i - coord_j) * r_ij ** (-self.k - 2)
 
         return f_int
 
@@ -390,8 +390,11 @@ class ComputePotentials(Initialization):
         return p_total
 
 class MonteCarlo(ComputePotentials):
-    def __init__(self, param):
-        Initialization.__init__(self, param)
+    def __init__(self, param_obj):
+        attr_dict = vars(param_obj)
+        for key in attr_dict:
+            setattr(self, key, attr_dict[key])
+
         Initialization.init_coords(self)
 
     def metropolis_algrtm(self, coords):
@@ -472,8 +475,10 @@ class MonteCarlo(ComputePotentials):
 
 
 class MolecularDynamics(ComputeForces, ComputePotentials):
-    def __init__(self, param):
-        Initialization.__init__(self, param)
+    def __init__(self, param_obj):
+        attr_dict = vars(param_obj)
+        for key in attr_dict:
+            setattr(self, key, attr_dict[key])
         Initialization.init_coords(self)
         Initialization.init_velo(self)
 
@@ -544,10 +549,15 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
         return output
 
 
-class TrajAnalysis(Initialization):
-    def __init__(self, param, traj):
+class TrajAnalysis:
+    def __init__(self, param_obj, traj):
         np.set_printoptions(suppress=True)
-        Initialization.__init__(self, param)
+
+        # copy the attributes instead of inheriting from Initialization (using Initialization.__init__(self, param))
+        # so we can change the parameters externally by modifying the instance of Initialization
+        attr_dict = vars(param_obj)
+        for key in attr_dict:
+            setattr(self, key, attr_dict[key])
     
         if self.simulation == 'MD':
             self.time, self.E_k, self.E_p, self.temp, self.L = [], [], [], [], []
@@ -604,7 +614,7 @@ class TrajAnalysis(Initialization):
 
     def plot_2d(self, y, y_name, truncate=0, y_unit=None):
         plt.figure()
-        x = np.arange(self.N_steps + 1)[truncate:]
+        x = np.arange(len(y))[truncate:] * self.print_freq
         y = y[truncate:]
         plt.plot(x, y)
         plt.title('%s as a function of simulation step' % y_name)
@@ -617,7 +627,7 @@ class TrajAnalysis(Initialization):
 
     def plot_MD_energy(self):
         plt.figure()
-        x = np.arange(self.N_steps + 1)
+        x = np.arange(len(y))* self.print_freq
         plt.plot(x, np.array(self.E_k) / self.N_particles, label='Kinetic energy')
         plt.plot(x, np.array(self.E_p) / self.N_particles, label='Potential energy')
         plt.plot(x, np.array(self.E_total) / self.N_particles, label='Total energy')
@@ -634,9 +644,10 @@ class TrajAnalysis(Initialization):
         plt.title('Trajectory of the particles in the x-y plane')
         plt.xlabel('x (nm)')
         plt.ylabel('y (nm)')
-        plt.xlim([-0.5 * self.box_length, 0.5 * self.box_length])
-        plt.ylim([-0.5 * self.box_length, 0.5 * self.box_length])
-        plt.gca().set_aspect('equal', adjustable='box')
+        if self.PBC == 'yes':
+            plt.xlim([-0.5 * self.box_length, 0.5 * self.box_length])
+            plt.ylim([-0.5 * self.box_length, 0.5 * self.box_length])
+            plt.gca().set_aspect('equal', adjustable='box')
         plt.grid()
 
     def plot_all_MD(self):
