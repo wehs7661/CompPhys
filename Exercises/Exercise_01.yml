@@ -1,12 +1,12 @@
 # Simulation parameters
 simulation: 'MC'
-N_particles: 10
-N_steps: 50000
+N_particles: 50
+N_steps: 200
 print_freq: 1
 
 dimension: 3
-box_length: 3
-temperature: 0.9
+rho: 0.5
+temperature: 2
 coords_method: 'random'
 PBC: 'yes'
 max_d: 0.1
@@ -17,6 +17,5 @@ potential: 'LJ'
 epsilon: 1  # epsilon in LJ potential
 sigma: 1    # signma in LJ potential
 energy_truncation: 'yes'
-r_c: 1.5
 tail_correction: 'yes'
-MC_E_total: 'no'
+MC_E_total: 'yes'

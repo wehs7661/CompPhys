@@ -453,14 +453,15 @@ class MonteCarlo(ComputeForces, ComputePotentials):
 
         # quantities at t = 0
         output0 = self.output_data(0, coords)
-        with open(self.traj_name, 'a+', newline='') as outfile:
-            outfile.write('# Output data of MC simulation\n')
-            yaml.dump(output0, outfile, default_flow_style=False)
-            coords_list = coords.tolist()  # to prevent line breaks when printing to the file
-            outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-            outfile.write('y-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-            if self.dimension == 3:
-                outfile.write('z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+        outfile = open(self.traj_name, 'a+')
+        #with open(self.traj_name, 'a+', newline='') as outfile:
+        outfile.write('# Output data of MC simulation\n')
+        yaml.dump(output0, outfile, default_flow_style=False)
+        coords_list = coords.tolist()  # to prevent line breaks when printing to the file
+        outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+        outfile.write('y-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+        if self.dimension == 3:
+            outfile.write('z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
 
         n_accept = 0   # for calculating the average acceptance probability
         n_trials = 0   # for calculating the instantaneous acceptance probability
@@ -508,20 +509,28 @@ class MonteCarlo(ComputeForces, ComputePotentials):
                         coords -= self.box_length * np.round(coords / self.box_length)
                 else:
                     pass  # so the coordinates and the energy remain the same
+
             self.p_acc.append(n_accept / n_trials)
+
+            if i % 100 == 1:   # calculate p_acc every 1000 steps
+                acc_rate = n_accept / n_trials
+                if acc_rate <= 0.2:
+                    self.max_d *= 0.8
+                elif acc_rate >= 0.5:
+                    self.max_d *= 1.2
 
             # print the trajectory data
             output = self.output_data(i + 1, coords)
-            with open(self.traj_name, 'a+', newline='') as outfile:
-                if i % self.print_freq == self.print_freq - 1:
-                    outfile.write("\n")
-                    yaml.dump(output, outfile, default_flow_style=False)
-                    coords_list = coords.tolist()  # to prevent line breaks when printing to the file
-                    outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-                    outfile.write('y-coordinates: ' + str([coords_list[i][1] for i in range(len(coords_list))]) + '\n')
-                    if self.dimension == 3:
-                        outfile.write('z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
-
+            if i % self.print_freq == self.print_freq - 1:
+                outfile.write("\n")
+                yaml.dump(output, outfile, default_flow_style=False)
+                coords_list = coords.tolist()  # to prevent line breaks when printing to the file
+                outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                outfile.write('y-coordinates: ' + str([coords_list[i][1] for i in range(len(coords_list))]) + '\n')
+                if self.dimension == 3:
+                    outfile.write('z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
+        
+        outfile.close()
         # Note: self.p_acc[-1] = n_accept / self.N_steps --> average acceptance ratio
 
     def output_data(self, i, coords):
@@ -679,7 +688,7 @@ class TrajAnalysis:
 
     def plot_2d(self, y, y_name, truncate=0, y_unit=None):
         plt.figure()
-        x = np.arange(self.N_steps + 1)[truncate:] * self.print_freq
+        x = np.arange(0, self.N_steps + 1, self.print_freq)[truncate:]
         y = y[truncate:]
         plt.plot(x, y)
         plt.title('%s as a function of simulation step' % y_name)
@@ -692,7 +701,7 @@ class TrajAnalysis:
 
     def plot_MD_energy(self):
         plt.figure()
-        x = np.arange(self.N_steps + 1)* self.print_freq
+        x = np.arange(0, self.N_steps + 1, self.print_freq)
         plt.plot(x, np.array(self.E_k) / self.N_particles, label='Kinetic energy')
         plt.plot(x, np.array(self.E_p) / self.N_particles, label='Potential energy')
         plt.plot(x, np.array(self.E_total) / self.N_particles, label='Total energy')
