@@ -15,6 +15,7 @@ n: 2
 potential: central
 print_freq: 1
 r_c: 0
+rho: 0.14814814814814814
 shift_energy: 'no'
 simulation: MD
 u: 1

@@ -38,7 +38,7 @@ setup_yaml()
 class Initialization:
     def __init__(self, param):
         with open(param) as ymlfile:
-            self.param = yaml.load(ymlfile, Loader=yaml.FullLoader)
+            self.param = yaml.load(ymlfile)
 
         for attr in self.param:
             setattr(self, attr, self.param[attr])
@@ -217,7 +217,7 @@ class ComputeForces(Initialization):
             f_int[:] = self.a * self.k * (coord_i - coord_j) * r_ij ** (-self.k - 2)
         else:
             pass # so f_int = np.zeros([1, self.dimension])
-        f_int[:] = self.a * self.k * (coord_i - coord_j) * r_ij ** (-self.k - 2)
+        #f_int[:] = self.a * self.k * (coord_i - coord_j) * r_ij ** (-self.k - 2)
 
         return f_int
 

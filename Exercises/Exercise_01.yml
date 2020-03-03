@@ -1,7 +1,7 @@
 # Simulation parameters
 simulation: 'MC'
-N_particles: 50
-N_steps: 200
+N_particles: 10
+N_steps: 50000
 print_freq: 1
 
 dimension: 3
@@ -19,4 +19,4 @@ sigma: 1    # signma in LJ potential
 energy_truncation: 'yes'
 r_c: 1.5
 tail_correction: 'yes'
-MC_E_total: 'yes'
+MC_E_total: 'no'
