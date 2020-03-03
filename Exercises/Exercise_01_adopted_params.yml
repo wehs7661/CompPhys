@@ -1,18 +1,22 @@
 # Adopted simulation parameters
+MC_E_total: 'yes'
 N_particles: 50
 N_steps: 200
 PBC: 'yes'
 box_length: 3
 coords_method: random
 dimension: 3
-energy_truncation: 'no'
+energy_truncation: 'yes'
 epsilon: 1
 kb: 1
 m: 1
-max_d: 0.5
+max_d: 0.1
 potential: LJ
 print_freq: 1
+r_c: 1.5
+rho: 1.8518518518518519
 shift_energy: 'no'
 sigma: 1
 simulation: MC
-temperature: 1
+tail_correction: 'yes'
+temperature: 0.9

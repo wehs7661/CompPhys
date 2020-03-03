@@ -6,14 +6,17 @@ print_freq: 1
 
 dimension: 3
 box_length: 3
-temperature: 1
+temperature: 0.9
 coords_method: 'random'
 PBC: 'yes'
-max_d: 0.5
+max_d: 0.1
 
 kb: 1
 m: 1   # the mass of the particles (all the same)
 potential: 'LJ'
 epsilon: 1  # epsilon in LJ potential
 sigma: 1    # signma in LJ potential
-energy_truncation: 'no'
+energy_truncation: 'yes'
+r_c: 1.5
+tail_correction: 'yes'
+MC_E_total: 'yes'
