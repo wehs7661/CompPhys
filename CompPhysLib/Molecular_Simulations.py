@@ -37,6 +37,8 @@ setup_yaml()
 
 class Initialization:
     def __init__(self, param):
+        # note that self.param is the parameters specified in the file 
+        # and is indepdent of whether the parameter value is later changed externally
         with open(param) as ymlfile:
             try:
                 self.param = yaml.load(ymlfile, Loader=yaml.FullLoader)
@@ -81,12 +83,15 @@ class Initialization:
             print('Error: At least one of the the length of the box or particle density should be specified.')
             sys.exit()
 
-        if 'box_length' not in self.param and 'rho' in self.param:
-            # only if box_legth is not specificed is rho activated
-            self.box_length = (self.N_particles / self.rho) ** (1 / 3)
+        if 'box_length' in self.param and 'rho' in self.param:
+            # make box_length have higher prioirty than rho
+            self.rho = self.N_particles / (self.box_length) ** 3
+
+        #if 'box_length' not in self.param and 'rho' in self.param:
+        #    self.box_length = (self.N_particles / self.rho) ** (1 / 3)
         
-        # calculate rho if needed (this will have no influence if rho is already specified)
-        self.rho = self.N_particles / (self.box_length) ** 3
+        #if 'box_length' in self.param and 'rho' not in self.param:
+        #    self.rho = self.N_particles / (self.box_length) ** 3
 
         # assign defaults to non-specified paramters
         if self.simulation == 'MD':
@@ -125,6 +130,19 @@ class Initialization:
         # Step 3: Add other attributes
         self.prefix = param.split('.')[0]
         self.traj_name = self.prefix + '_traj.yml'
+
+        # Step 4: Delete self.param to prevent confusion/repeptition
+        delattr(self, 'param')
+
+    @property
+    def box_length(self):
+        if 'box_length' not in self.param and 'rho' in self.param:
+            return (self.N_particles / self.rho) ** (1 / 3)
+
+    @property
+    def rho(self):
+        if 'box_length' in self.param and 'rho' not in self.param:
+            return self.N_particles / (self.box_length) ** 3
 
     def examine_params(self, var: str, required=False, default=None):
         if required is True:
@@ -445,8 +463,10 @@ class ComputePotentials(Initialization):
 class MonteCarlo(ComputeForces, ComputePotentials):
     def __init__(self, param_obj):
         attr_dict = vars(param_obj)
+        print(attr_dict)
         for key in attr_dict:
             setattr(self, key, attr_dict[key])
+
         print('In MC:', self.rho)
         print('In MC:', self.box_length)
         Initialization.init_coords(self)
