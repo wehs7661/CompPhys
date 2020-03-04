@@ -1,9 +1,9 @@
 # Adopted simulation parameters
 MC_E_total: 'yes'
-N_particles: 50
-N_steps: 200
+N_particles: 10
+N_steps: 50000
 PBC: 'yes'
-box_length: 4.641588833612778
+box_length: 2.231443166940565
 coords_method: random
 dimension: 3
 energy_truncation: 'yes'
@@ -12,9 +12,9 @@ kb: 1
 m: 1
 max_d: 0.1
 potential: LJ
-print_freq: 1
-r_c: 2.320794416806389
-rho: 0.5000000000000001
+print_freq: 100
+r_c: 1.1157215834702825
+rho: 0.9
 shift_energy: 'no'
 sigma: 1
 simulation: MC

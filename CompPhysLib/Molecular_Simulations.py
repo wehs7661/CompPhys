@@ -38,7 +38,10 @@ setup_yaml()
 class Initialization:
     def __init__(self, param):
         with open(param) as ymlfile:
-            self.param = yaml.load(ymlfile)
+            try:
+                self.param = yaml.load(ymlfile, Loader=yaml.FullLoader)
+            except AttributeError:
+                self.param = yaml.load(ymlfile)
 
         for attr in self.param:
             setattr(self, attr, self.param[attr])
@@ -133,6 +136,8 @@ class Initialization:
                 setattr(self, var, default)
 
     def init_coords(self):
+        print('In Init:', self.rho)
+        print('In Init:', self.box_length)
         if self.coords_method == 'random':
             self.coords = (0.5 - np.random.rand(self.N_particles, self.dimension)) * self.box_length  # initial coordinates
         elif self.coords_method == 'lattice':
@@ -442,8 +447,12 @@ class MonteCarlo(ComputeForces, ComputePotentials):
         attr_dict = vars(param_obj)
         for key in attr_dict:
             setattr(self, key, attr_dict[key])
-
+        print('In MC:', self.rho)
+        print('In MC:', self.box_length)
         Initialization.init_coords(self)
+        print('In MC:', self.rho)
+        print('In MC:', self.box_length)
+
 
     def metropolis_algrtm(self, coords):
         for file in os.listdir('.'):

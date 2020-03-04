@@ -1,11 +1,11 @@
 # Simulation parameters
 simulation: 'MC'
-N_particles: 50
-N_steps: 200
-print_freq: 1
+N_particles: 10
+N_steps: 50000
+print_freq: 100
 
 dimension: 3
-rho: 0.5
+rho: 0.9
 temperature: 2
 coords_method: 'random'
 PBC: 'yes'
