@@ -3,6 +3,7 @@ MC_E_total: 'yes'
 N_particles: 10
 N_steps: 50000
 PBC: 'yes'
+box_length: 2.231443166940565
 coords_method: random
 dimension: 3
 energy_truncation: 'yes'

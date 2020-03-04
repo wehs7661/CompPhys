@@ -11,6 +11,9 @@ from itertools import combinations
 from itertools import product
 from matplotlib import rc
 
+import warnings
+warnings.filterwarnings("ignore")
+
 rc('font', **{
     'family': 'sans-serif',
     'sans-serif': ['DejaVu Sans'],
@@ -87,11 +90,11 @@ class Initialization:
             # make box_length have higher prioirty than rho
             self.rho = self.N_particles / (self.box_length) ** 3
 
-        #if 'box_length' not in self.param and 'rho' in self.param:
-        #    self.box_length = (self.N_particles / self.rho) ** (1 / 3)
+        if 'box_length' not in self.param and 'rho' in self.param:
+            self.box_length = (self.N_particles / self.rho) ** (1 / 3)
         
-        #if 'box_length' in self.param and 'rho' not in self.param:
-        #    self.rho = self.N_particles / (self.box_length) ** 3
+        if 'box_length' in self.param and 'rho' not in self.param:
+            self.rho = self.N_particles / (self.box_length) ** 3
 
         # assign defaults to non-specified paramters
         if self.simulation == 'MD':
@@ -133,7 +136,7 @@ class Initialization:
 
         # Step 4: Delete self.param to prevent confusion/repeptition
         delattr(self, 'param')
-
+    """
     @property
     def box_length(self):
         if 'box_length' not in self.param and 'rho' in self.param:
@@ -143,6 +146,7 @@ class Initialization:
     def rho(self):
         if 'box_length' in self.param and 'rho' not in self.param:
             return self.N_particles / (self.box_length) ** 3
+    """
 
     def examine_params(self, var: str, required=False, default=None):
         if required is True:
@@ -154,8 +158,8 @@ class Initialization:
                 setattr(self, var, default)
 
     def init_coords(self):
-        print('In Init:', self.rho)
-        print('In Init:', self.box_length)
+        #print('In Init:', self.rho)
+        #print('In Init:', self.box_length)
         if self.coords_method == 'random':
             self.coords = (0.5 - np.random.rand(self.N_particles, self.dimension)) * self.box_length  # initial coordinates
         elif self.coords_method == 'lattice':
@@ -463,15 +467,15 @@ class ComputePotentials(Initialization):
 class MonteCarlo(ComputeForces, ComputePotentials):
     def __init__(self, param_obj):
         attr_dict = vars(param_obj)
-        print(attr_dict)
+        #print(attr_dict)
         for key in attr_dict:
             setattr(self, key, attr_dict[key])
 
-        print('In MC:', self.rho)
-        print('In MC:', self.box_length)
+        #print('In MC:', self.rho)
+        #print('In MC:', self.box_length)
         Initialization.init_coords(self)
-        print('In MC:', self.rho)
-        print('In MC:', self.box_length)
+        #print('In MC:', self.rho)
+        #print('In MC:', self.box_length)
 
 
     def metropolis_algrtm(self, coords):
@@ -728,22 +732,22 @@ class TrajAnalysis:
             plt.ylabel('%s (%s)' % (y_name, y_unit))
         plt.grid()
 
-    def plot_MD_energy(self):
+    def plot_MD_energy(self, truncate=0):
         plt.figure()
-        x = np.arange(0, self.N_steps + 1, self.print_freq)
-        plt.plot(x, np.array(self.E_k) / self.N_particles, label='Kinetic energy')
-        plt.plot(x, np.array(self.E_p) / self.N_particles, label='Potential energy')
-        plt.plot(x, np.array(self.E_total) / self.N_particles, label='Total energy')
+        x = np.arange(0, self.N_steps + 1, self.print_freq)[truncate:]
+        plt.plot(x[truncate:], np.array(self.E_k[truncate:]) / self.N_particles, label='Kinetic energy')
+        plt.plot(x[truncate:], np.array(self.E_p[truncate:]) / self.N_particles, label='Potential energy')
+        plt.plot(x[truncate:], np.array(self.E_total[truncate:]) / self.N_particles, label='Total energy')
         plt.xlabel('Timestep')
         plt.ylabel('Energy per particle')
         plt.legend()
         plt.grid()
 
-    def plot_xy_traj(self):
+    def plot_xy_traj(self, truncate=0):
         plt.figure()
         for i in range(self.N_particles):
-            plt.scatter(self.x[i], self.y[i], c=plt.cm.GnBu(
-                np.linspace(0, 1, len(self.step))))
+            plt.scatter(self.x[i][truncate:], self.y[i][truncate:], c=plt.cm.GnBu(
+                np.linspace(0, 1, len(self.step))[truncate:]))
         plt.title('Trajectory of the particles in the x-y plane')
         plt.xlabel('x (nm)')
         plt.ylabel('y (nm)')
