@@ -464,6 +464,28 @@ class ComputePotentials(Initialization):
         
         return E_pair_total
 
+class ParticleList(Initialization):
+    def __init__(self, param):
+        Initialization.__init__(self, param)
+
+    def verlet_list(self):
+        pass
+
+    def cell_list(self):
+        pass
+
+class Thermostats(Initialization):
+    def __init__(self, param):
+        Initialization.__init__(self, param)
+
+    def andersen(self):
+        pass
+
+    def nose_hoover(self):
+        pass
+
+
+
 class MonteCarlo(ComputeForces, ComputePotentials):
     def __init__(self, param_obj):
         attr_dict = vars(param_obj)

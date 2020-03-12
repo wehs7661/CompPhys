@@ -39,6 +39,12 @@ This is a repository for the class PHYS-7810: Computational Statistical Physics 
   - `r_c`: cutoff distance used in energy truncation (Default: half of the box length)
   - `shift_energy`: whether to shift the truncation (Default: `no`.)
 
+  #### Completed assignments
+  As a record, the following tutorials, assignments and exercises are all completed:
+  - Tutorial_01, Tutorial_02
+  - Homework_01, Homework_02, Homework_03. (All are completed.)
+  - Exercise_01
+
 
 ## Copyright
 Copyright (c) 2020, Wei-Tse Hsu (wehs7661@colorado.edu)
