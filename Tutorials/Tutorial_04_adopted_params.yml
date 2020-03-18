@@ -1,6 +1,6 @@
 # Adopted simulation parameters
 N_particles: 4
-N_steps: 1000
+N_steps: 20000
 PBC: 'yes'
 box_length: 3
 coords_method: lattice
@@ -10,10 +10,13 @@ energy_truncation: 'yes'
 epsilon: 1
 kb: 1
 m: 1
-potential: LJ
+potential: WCA
 print_freq: 1
-r_c: 2.5
+r_c: 1.122462048309373
+r_min: 1.122462048309373
+rho: 0.14814814814814814
 shift_energy: 'yes'
 sigma: 1
 simulation: MD
+tail_correction: 'no'
 velo_method: random

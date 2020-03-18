@@ -41,9 +41,9 @@ This is a repository for the class PHYS-7810: Computational Statistical Physics 
 
   #### Completed assignments
   As a record, the following tutorials, assignments and exercises are all completed:
-  - Tutorial_01, Tutorial_02
+  - Tutorial_01, Tutorial_02, Tutorial_03, Tutorial_04. 
   - Homework_01, Homework_02, Homework_03. (All are completed.)
-  - Exercise_01
+  - Exercise_01.
 
 
 ## Copyright

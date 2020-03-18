@@ -1,6 +1,6 @@
 # Adopted simulation parameters
 N_particles: 4
-N_steps: 1000
+N_steps: 10000
 PBC: 'no'
 a: 1
 box_length: 3

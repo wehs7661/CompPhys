@@ -88,21 +88,23 @@ class Initialization:
 
         if 'box_length' in self.param and 'rho' in self.param:
             # make box_length have higher prioirty than rho
-            self.rho = self.N_particles / (self.box_length) ** 3
+            self.rho = self.N_particles / (self.box_length) ** self.dimension
 
         if 'box_length' not in self.param and 'rho' in self.param:
-            self.box_length = (self.N_particles / self.rho) ** (1 / 3)
+            self.box_length = (self.N_particles / self.rho) ** (1 / self.dimension)
         
         if 'box_length' in self.param and 'rho' not in self.param:
-            self.rho = self.N_particles / (self.box_length) ** 3
+            self.rho = self.N_particles / (self.box_length) ** self.dimension
 
         # assign defaults to non-specified paramters
         if self.simulation == 'MD':
             self.examine_params('dt', False, 0.01)
         
-        if self.potential == 'LJ':
+        if self.potential == 'LJ' or self.potential == 'WCA':
             self.examine_params('epsilon', False, 1)
             self.examine_params('sigma', False, 1)
+            self.r_min = 2 ** (1/6) * self.sigma
+
 
         self.examine_params('print_freq', False, 1)
         self.examine_params('dimension', False, 3)
@@ -115,6 +117,25 @@ class Initialization:
 
         if self.energy_truncation == 'yes':
             self.examine_params('r_c', False, 0.5 * self.box_length)
+
+        if self.potential == 'WCA':
+            self.tail_correction = 'no'   # no correction for WCA
+            self.energy_truncation = 'yes'
+            self.shift_energy = 'yes'
+            self.r_c = self.r_min
+            if self.box_length < 2 * self.r_c:
+                print('Error: WCA potential is used but L is smaller than 2 * r_c.')
+                print('box_length: %s, r_c: %s' % (self.box_length, self.r_c))
+                sys.exit()
+
+        # print options
+        self.examine_params('print_coords', False, 'yes')
+        self.examine_params('print_Ek', False, 'yes')
+        self.examine_params('print_Ep', False, 'yes')
+        self.examine_params('print_Etotal', False, 'yes')
+        self.examine_params('print_temp', False, 'yes')
+        self.examine_params('print_pressure', False, 'yes')
+        self.examine_params('print_L_total', False, 'yes')
 
         # Step 2: Print the adopted parameters to a yaml file
         adopted_params = copy.deepcopy(vars(self))
@@ -305,7 +326,7 @@ class ComputeForces(Initialization):
 
             f_total = f_int_total + f_ext
 
-        elif self.potential == 'LJ':
+        elif self.potential == 'LJ'or self.potential == 'WCA':
             f0_LJ_dict = {}
             ij_pair = combinations(np.arange(1, self.N_particles + 1), 2)
             for p in ij_pair:
@@ -401,8 +422,9 @@ class ComputePotentials(Initialization):
             p_LJ = 4 * self.epsilon * (r12 - r6)
 
             if self.shift_energy == 'yes':
-                rc12 = (self.epsilon / self.r_c) ** 12
-                rc6 = (self.epsilon / self.r_c) ** 6
+                rc = self.r_c - self.box_length * np.round(self.r_c / self.box_length)
+                rc12 = (self.epsilon / rc) ** 12
+                rc6 = (self.epsilon / rc) ** 6
                 pc_LJ = 4 * self.epsilon * (rc12 - rc6)
                 p_LJ -= pc_LJ
         else:
@@ -433,7 +455,7 @@ class ComputePotentials(Initialization):
                 # Step 3: calculate total potential
                 p_total = p_int_total + p_ext
 
-        elif self.potential == 'LJ':
+        elif self.potential == 'LJ' or self.potential == 'WCA':
             # note that combinations returns a generator which produces its values when needed
             # instead of calculating everything at once and storing the result in memory.
             # Therefore, we don't use ij_pair = list(combinations(...)) and loop over the list, which is slower.
@@ -513,10 +535,12 @@ class MonteCarlo(ComputeForces, ComputePotentials):
         outfile.write('# Output data of MC simulation\n')
         yaml.dump(output0, outfile, default_flow_style=False)
         coords_list = coords.tolist()  # to prevent line breaks when printing to the file
-        outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-        outfile.write('y-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-        if self.dimension == 3:
-            outfile.write('z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+        
+        if self.print_coords != 'no':
+            outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+            outfile.write('y-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+            if self.dimension == 3:
+                outfile.write('z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
 
         n_accept = 0   # for calculating the average acceptance probability
         n_trials = 0   # for calculating the instantaneous acceptance probability
@@ -579,11 +603,12 @@ class MonteCarlo(ComputeForces, ComputePotentials):
             if i % self.print_freq == self.print_freq - 1:
                 outfile.write("\n")
                 yaml.dump(output, outfile, default_flow_style=False)
-                coords_list = coords.tolist()  # to prevent line breaks when printing to the file
-                outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-                outfile.write('y-coordinates: ' + str([coords_list[i][1] for i in range(len(coords_list))]) + '\n')
-                if self.dimension == 3:
-                    outfile.write('z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
+                if self.print_coords != 'no':
+                    coords_list = coords.tolist()  # to prevent line breaks when printing to the file
+                    outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                    outfile.write('y-coordinates: ' + str([coords_list[i][1] for i in range(len(coords_list))]) + '\n')
+                    if self.dimension == 3:
+                        outfile.write('z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
         
         outfile.close()
         # Note: self.p_acc[-1] = n_accept / self.N_steps --> average acceptance ratio
@@ -593,10 +618,11 @@ class MonteCarlo(ComputeForces, ComputePotentials):
             coords -= self.box_length * np.round(coords / self.box_length)
         output = OrderedDict()
         output['Step'] = i
-        if self.MC_E_total == 'yes':
+        if self.print_Etotal != 'no':
             output['E_total'] = float(self.total_potential(coords))  # E_total = E_p
-        virial = self.virial(coords)
-        output['Pressure'] = float(self.pressure(virial))
+        if self.print_pressure != 'no':
+            virial = self.virial(coords)
+            output['Pressure'] = float(self.pressure(virial))
 
         return output
 
@@ -628,11 +654,12 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
         with open(self.traj_name, 'a+', newline='') as outfile:
             outfile.write('# Output data of MD simulation\n')
             yaml.dump(output0, outfile, default_flow_style=False)
-            coords_list = coords.tolist()  # to prevent line breaks when printing to the file
-            outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-            outfile.write('y-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-            if self.dimension == 3:
-                outfile.write('z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+            if self.print_coords != 'no':
+                coords_list = coords.tolist()  # to prevent line breaks when printing to the file
+                outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                outfile.write('y-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                if self.dimension == 3:
+                    outfile.write('z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
 
         for i in range(self.N_steps):
             if self.PBC == 'yes':
@@ -653,11 +680,12 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
                 if i % self.print_freq == self.print_freq - 1:
                     outfile.write("\n")
                     yaml.dump(output, outfile, default_flow_style=False)
-                    coords_list = coords.tolist()  # to prevent line breaks when printing to the file
-                    outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-                    outfile.write('y-coordinates: ' + str([coords_list[i][1] for i in range(len(coords_list))]) + '\n')
-                    if self.dimension == 3:
-                        outfile.write('z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
+                    if self.print_coords != 'no':
+                        coords_list = coords.tolist()  # to prevent line breaks when printing to the file
+                        outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                        outfile.write('y-coordinates: ' + str([coords_list[i][1] for i in range(len(coords_list))]) + '\n')
+                        if self.dimension == 3:
+                            outfile.write('z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
 
     def output_data(self, i, velocities, coords):
         if self.PBC == 'yes':
@@ -666,12 +694,18 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
         output['Step'] = i
         output['Time'] = self.dt * (i)
         # norm(v) = sqrt{vx1^2 + vy1^2 + vx2^2 + vy2^2 + ...}
-        output['E_k'] = float(0.5 * self.m * norm(velocities) ** 2)
-        output['E_p'] = float(self.total_potential(coords))
-        output['E_total'] = float(output['E_k'] + output['E_p'])
+        if self.print_Ek != 'no':
+            output['E_k'] = float(0.5 * self.m * norm(velocities) ** 2)
+        if self.print_Ep != 'no':
+            output['E_p'] = float(self.total_potential(coords))
+        if self.print_Etotal != 'no' and self.print_Ek != 'no' and self.print_Ep != 'no':
+            output['E_total'] = float(output['E_k'] + output['E_p'])
+        
         # Equilipartition theorem: <2Ek> = (3N-3)kT
-        output['Temp'] = float((2 * output['E_k']) / ((3 * self.N_particles - 3) *self.kb))
-        output['L_total'] = float(self.angular_momentum(velocities, coords))
+        if self.print_temp != 'no':
+            output['Temp'] = float((2 * output['E_k']) / ((3 * self.N_particles - 3) *self.kb))
+        if self.print_L_total != 'no':
+            output['L_total'] = float(self.angular_momentum(velocities, coords))
 
         return output
 
@@ -733,12 +767,32 @@ class TrajAnalysis:
                     self.z[i][len(self.step) - 1] = float(l.split(':')
                                                           [1].split('[')[1].split(']')[0].split(',')[i])
 
-    def calculate_RMSF(self, E_total):
-        E_avg = np.mean(E_total)
-        E2_avg = np.mean(np.power(E_total, 2))
-        RMSF = np.sqrt((E2_avg - E_avg ** 2)) / E_avg
+    def calculate_RMSF(self, y):
+        # y: any quantity
+        y_avg = np.mean(y)
+        y2_avg = np.mean(np.power(y, 2))
+        RMSF = np.sqrt((y2_avg - y_avg ** 2)) / y_avg
 
         return RMSF
+
+    def plot_SMA(self, n, y, y_name, y_unit=None):
+        # SMA: simple moving average (for time series)
+        # n: the size of the subset 
+        n_points = len(y) - n + 1   # number of points
+        SMA = []
+        for i in range(n_points):
+            SMA.append(np.mean(np.array(y[i:i + n])))        
+        step = np.arange(0, self.N_steps + 1, self.print_freq)[n - 1:]
+        plt.title('SMA of %s as a function of simulation step' % y_name)
+        plt.plot(step, SMA)
+        plt.xlabel('Simulation step')
+        if y_unit is None:
+            plt.ylabel('%s ' % y_name)
+        else:
+            plt.ylabel('%s (%s)' % (y_name, y_unit))
+        plt.grid()
+
+        return SMA
             
 
     def plot_2d(self, y, y_name, truncate=0, y_unit=None):
@@ -773,10 +827,6 @@ class TrajAnalysis:
         plt.title('Trajectory of the particles in the x-y plane')
         plt.xlabel('x (nm)')
         plt.ylabel('y (nm)')
-        #if self.PBC == 'yes':
-        #    plt.xlim([-0.5 * self.box_length, 0.5 * self.box_length])
-        #    plt.ylim([-0.5 * self.box_length, 0.5 * self.box_length])
-        #    plt.gca().set_aspect('equal', adjustable='box')
         plt.grid()
 
     def plot_all_MD(self):
