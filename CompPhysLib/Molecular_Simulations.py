@@ -40,7 +40,7 @@ setup_yaml()
 
 class Initialization:
     def __init__(self, param):
-        # note that self.param is the parameters specified in the file 
+        # note that self.param is the parameters specified in the file
         # and is indepdent of whether the parameter value is later changed externally
         with open(param) as ymlfile:
             try:
@@ -72,12 +72,12 @@ class Initialization:
             self.examine_params('max_d', True)
 
         # some special cases
-        if self.simulation == 'MC' or (self.simulation == 'MD' and self.velo_method == 'temp_rescale'):
-            # temeprature must be specified in an NVT MC simulation or if temp_rescale is used
-            self.examine_params('temperature', True)
+        if self.simulation == 'MC' or (self.simulation == 'MD' and self.velo_method == 'maxwell'):
+            # temeprature must be specified in an NVT MC simulation or if 'maxwell' is used
+            self.examine_params('t_ref', True)
 
         if self.simulation == 'MD':
-            if 'temperature' not in self.param:
+            if 't_ref' not in self.param:
                 self.velo_method = 'random'
             self.examine_params('velo_method', False, 'random')
 
@@ -91,20 +91,20 @@ class Initialization:
             self.rho = self.N_particles / (self.box_length) ** self.dimension
 
         if 'box_length' not in self.param and 'rho' in self.param:
-            self.box_length = (self.N_particles / self.rho) ** (1 / self.dimension)
-        
+            self.box_length = (self.N_particles /
+                               self.rho) ** (1 / self.dimension)
+
         if 'box_length' in self.param and 'rho' not in self.param:
             self.rho = self.N_particles / (self.box_length) ** self.dimension
 
         # assign defaults to non-specified paramters
         if self.simulation == 'MD':
             self.examine_params('dt', False, 0.01)
-        
+
         if self.potential == 'LJ' or self.potential == 'WCA':
             self.examine_params('epsilon', False, 1)
             self.examine_params('sigma', False, 1)
             self.r_min = 2 ** (1/6) * self.sigma
-
 
         self.examine_params('print_freq', False, 1)
         self.examine_params('dimension', False, 3)
@@ -114,6 +114,11 @@ class Initialization:
         self.examine_params('kb', False, 1)
         self.examine_params('energy_truncation', False, 'no')
         self.examine_params('shift_energy', False, 'no')
+        self.examine_params('tcoupl', False, 'no')
+
+        if self.tcoupl == 'Andersen':
+            self.examine_params('mu', False, 5)
+            self.examine_params('t_ref', True)
 
         if self.energy_truncation == 'yes':
             self.examine_params('r_c', False, 0.5 * self.box_length)
@@ -182,46 +187,54 @@ class Initialization:
         #print('In Init:', self.rho)
         #print('In Init:', self.box_length)
         if self.coords_method == 'random':
-            self.coords = (0.5 - np.random.rand(self.N_particles, self.dimension)) * self.box_length  # initial coordinates
+            self.coords = (0.5 - np.random.rand(self.N_particles,
+                                                self.dimension)) * self.box_length  # initial coordinates
         elif self.coords_method == 'lattice':
-            N = np.ceil((self.N_particles)**(1 / self.dimension))      # number of grids per side of the lattice
+            # number of grids per side of the lattice
+            N = np.ceil((self.N_particles)**(1 / self.dimension))
             r_min = -self.box_length / 2
             r_max = self.box_length / 2
             self.d = self.box_length / N   # initial spacing between particles
-            pos = np.linspace(r_min + 0.5 * self.d, r_max - 0.5 * self.d, int(N))
-            coords_list = list(product(pos, repeat=self.dimension))    # length is larger or equil to self.coords     
+            pos = np.linspace(r_min + 0.5 * self.d,
+                              r_max - 0.5 * self.d, int(N))
+            # length is larger or equil to self.coords
+            coords_list = list(product(pos, repeat=self.dimension))
             self.coords = np.zeros([self.N_particles, self.dimension])
             for i in range(len(self.coords)):
                 self.coords[i] = list(coords_list[i])
         else:
-            print('Error: The method for initializing the coordinates should be either "random" or "lattice".')
+            print(
+                'Error: The method for initializing the coordinates should be either "random" or "lattice".')
             sys.exit()
-    
+
     def init_velo(self):
         if self.velo_method == 'random':
             self.velocities = np.random.rand(
                 self.N_particles, self.dimension) * self.box_length * 0.1  # initial velocity
-        
-        elif self.velo_method == 'temp_rescale':
-            # reference: http://www.cchem.berkeley.edu/chem195/_l_j___andersen_thermostat_8m.html
-            # set initial velocities to random number
-            sigma = np.sqrt(self.temperature / self.m)
-            self.velocities = np.random.normal(scale=sigma, size=[self.N_particles, self.dimension])
 
+        elif self.velo_method == 'maxwell':
+            # reference: http://www.cchem.berkeley.edu/chem195/_l_j___andersen_thermostat_8m.html
+            # initialize velocities by drawing samples from Maxwell-Boltzmann distribution
+            sigma = np.sqrt(self.t_ref / self.m)   # on the other hand, mean is set to 0
+            self.velocities = np.random.normal(0, sigma, [self.N_particles, self.dimension])
+
+            """
             mean_v, mean_v2 = [], []
             v2 = np.power(self.velocities, 2)
             for i in range(self.dimension):
                 mean_v.append(np.mean(self.velocities[:, i]))
                 mean_v2.append(np.mean(v2[:, i]))
             mean_v, mean_v2 = np.array(mean_v), np.array(mean_v2)
-            f = np.sqrt(self.dimension * self.temperature / mean_v2 )        # scale factor of the velocities
+            # scale factor of the velocities
+            f = np.sqrt(self.dimension * self.t_ref / mean_v2)
             # (self.velocities - mean_v): set initial momentum to 0
-            # multiply by f: set initial kinetic energy to 1.5kbT (in 3D)
+            # multiply by f: set initial kinetic energy to 1.5kbT (in 3D) or kbT (in 2D)
             self.velocities = (self.velocities - mean_v) * f
-            self.velocities = np.random.normal(scale=sigma, size=[self.N_particles, self.dimension])
-
+            """
+        
         else:
-            print('Error: The method for initializing the velocities should be either "random" or "temp_rescale".')
+            print(
+                'Error: The method for initializing the velocities should be either "random" or "maxwell".')
             sys.exit()
 
     def calc_dist(self, coord_i, coord_j):
@@ -244,8 +257,8 @@ class ComputeForces(Initialization):
         This function calculates the external force of the particle i given the 
         coordinates of particle i, which is np.array([-unxri^{n-2}, -unyri^{n-2}]). 
         """
-        f_ext = np.zeros([1, self.dimension])  # x and y (and z) components
-        origin = np.zeros([1, self.dimension])
+        f_ext = np.zeros(self.dimension)  # x and y (and z) components
+        origin = np.zeros(self.dimension)
         r_i = Initialization.calc_dist(self, coord_i, origin)
         f_ext[:] = - self.u * self.n * coord_i[:] * r_i ** (self.n - 2)
 
@@ -257,33 +270,37 @@ class ComputeForces(Initialization):
         the particl j given the coordinates of the two particles, which is 
         np.array([ak(xi-xj)rij^{-k-2}, ak(yi-yj)rij^{-k-2}])
         """
-        f_int = np.zeros([1, self.dimension])  # x and y (and z) components
+        f_int = np.zeros(self.dimension)  # x and y (and z) components
         r_ij = Initialization.calc_dist(self, coord_i, coord_j)
 
         # Here we define that r_0 means no energy trunaction is used
         if (self.energy_truncation == 'yes' and r_ij < self.r_c) or (self.energy_truncation == 'no'):
-            f_int[:] = self.a * self.k * (coord_i - coord_j) * r_ij ** (-self.k - 2)
+            f_int[:] = self.a * self.k * \
+                (coord_i - coord_j) * r_ij ** (-self.k - 2)
         else:
-            pass # so f_int = np.zeros([1, self.dimension])
+            pass  # so f_int = np.zeros(self.dimension)
         #f_int[:] = self.a * self.k * (coord_i - coord_j) * r_ij ** (-self.k - 2)
 
         return f_int
 
     def LJ_force_ij(self, coord_i, coord_j):
-        f_LJ = np.zeros([1, self.dimension])  # x and y (and z) components
+        # return f_LJ, a matrix with each component of the force
+        f_LJ = np.zeros(self.dimension)  # x and y (and z) components
         r_ij = Initialization.calc_dist(self, coord_i, coord_j)
 
         # Here we define that r_0 means no energy trunaction is used
         if (self.energy_truncation == 'yes' and r_ij < self.r_c) or (self.energy_truncation == 'no'):
             r12 = (self.epsilon / r_ij) ** 12
             r6 = (self.epsilon / r_ij) ** 6
-            r_ij_vec = (coord_i - coord_j) 
+            r_ij_vec = (coord_i - coord_j)
             if self.PBC == 'yes':
-                r_ij_vec -= self.box_length * np.round(r_ij_vec / self.box_length)
-            f_LJ[:] = r_ij_vec * (48 * self.epsilon / (r_ij ** 2)) * (r12 - 0.5 * r6)
-        
+                r_ij_vec -= self.box_length * \
+                    np.round(r_ij_vec / self.box_length)
+            f_LJ[:] = r_ij_vec * (48 * self.epsilon /
+                                  (r_ij ** 2)) * (r12 - 0.5 * r6)
+
         else:
-            pass  # so f_LJ = np.zeros([1, self.dimension])
+            pass  # so f_LJ = np.zeros(self.dimension)
 
         return f_LJ
 
@@ -302,8 +319,7 @@ class ComputeForces(Initialization):
             ij_pair = combinations(np.arange(1, self.N_particles + 1), 2)
             # ex. list(ij_pair) = [(1, 2), (1, 3), (2, 3)] if self.N_particles = 3
             for p in ij_pair:
-                f0_int_dict[p] = self.interaction_force_ij(
-                    coords[p[0] - 1], coords[p[1] - 1])
+                f0_int_dict[p] = self.interaction_force_ij(coords[p[0] - 1], coords[p[1] - 1])
 
             # Step 2: Complete the dictionary. Note that the f_int(i,j) = -f_int(j,i)
             f_int_dict = copy.deepcopy(f0_int_dict)
@@ -317,7 +333,7 @@ class ComputeForces(Initialization):
             for i in np.arange(self.N_particles):
                 # [k for k in f_int_dict if k[0] == i] is [(1, 2), (1, 3)] if i = 1 for 3 particles
                 for pair in [k for k in f_int_dict if k[0] == i + 1]:
-                    f_int_total[i][:] += f_int_dict[pair][0][:]
+                    f_int_total[i][:] += f_int_dict[pair][:]
 
             # Step 4: Calculate the total force for particle of the particle i and loop over i
             f_ext = np.zeros([self.N_particles, self.dimension])
@@ -325,22 +341,31 @@ class ComputeForces(Initialization):
                 f_ext[i][:] = self.external_force_i(coords[i])
 
             f_total = f_int_total + f_ext
+        
+        if self.potential == 'LJ' or self.potential == 'WCA':
+            f_matrix = np.zeros([self.dimension, self.N_particles, self.N_particles])
+            # f_matrix[k, i, j] = k compoent of interaction acting on particle i by particle j
+            # Note that the diagonal (fii) should be 0, so we'll just leave it there
+            # Here we first calculate half of the matrix (j < i) for each k, since the matrix is symmetric
+            for i in range(self.N_particles):
+                for j in range(self.N_particles):
+                    if j < i:
+                        #print(coords[i])
+                        #print(coords[j])
+                        #print(self.LJ_force_ij(coords[i], coords[j]))
+                        f_matrix[:, i, j] = self.LJ_force_ij(coords[i], coords[j])
+                    elif j > i:
+                        break   # break the loop once cross the diagonal
+              
+            # then we finish the contruction of the symmetric matrix for each component
+            for i in range(self.dimension):
+                f_matrix[i] = -(f_matrix[i] -  f_matrix[i].transpose())
 
-        elif self.potential == 'LJ'or self.potential == 'WCA':
-            f0_LJ_dict = {}
-            ij_pair = combinations(np.arange(1, self.N_particles + 1), 2)
-            for p in ij_pair:
-                f0_LJ_dict[p] = self.LJ_force_ij(coords[p[0] - 1], coords[p[1] - 1])
-
-            f_LJ_dict = copy.deepcopy(f0_LJ_dict)
-            for i in f0_LJ_dict:
-                f_LJ_dict[i[::-1]] = -f0_LJ_dict[i]
-
+            # At last, calculate f_total for particle i
             f_total = np.zeros([self.N_particles, self.dimension])
-            for i in np.arange(self.N_particles):
-                for pair in [k for k in f_LJ_dict if k[0] == i + 1]:
-                    f_total[i][:] += f_LJ_dict[pair][0][:]
-    
+            for i in range(self.dimension):
+                f_total[:, i] = sum(f_matrix[i])
+
         else:
             print('Error: The type of the potential model should be either "central" or "LJ".')
             sys.exit()
@@ -367,10 +392,11 @@ class ComputeForces(Initialization):
         for p in ij_pair:
             r_ij_vec = coords[p[0] - 1] - coords[p[1] - 1]
             if self.PBC == 'yes':
-                r_ij_vec -= self.box_length * np.round(r_ij_vec / self.box_length)
+                r_ij_vec -= self.box_length * \
+                    np.round(r_ij_vec / self.box_length)
             f_ij_vec = self.LJ_force_ij(coords[p[0] - 1], coords[p[1] - 1])
             virial += np.dot(f_ij_vec, r_ij_vec)
-        
+
         virial *= (1/3)
 
         return virial
@@ -378,12 +404,13 @@ class ComputeForces(Initialization):
     def pressure(self, virial):
         # First calculate tail correction if needed
         p_tail = 0
-        beta = 1 / self.temperature
+        beta = 1 / self.t_ref
         if self.tail_correction == 'yes':
             rc_term = (2/3) * (1 / self.r_c) ** 9 - (1 / self.r_c) ** 3
             p_tail = (16/3) * np.pi * self.rho ** 2 * rc_term
 
-        pressure = self.rho / beta + virial / (self.box_length) ** 3 + p_tail    # p_tail could be 0
+        pressure = self.rho / beta + virial / \
+            (self.box_length) ** 3 + p_tail    # p_tail could be 0
 
         return pressure
 
@@ -393,7 +420,7 @@ class ComputePotentials(Initialization):
         Initialization.__init__(self, param)
 
     def external_potential_i(self, coord_i):
-        origin = np.zeros([1, self.dimension])
+        origin = np.zeros(self.dimension)
         r_i = Initialization.calc_dist(self, coord_i, origin)
         p_ext = self.u * r_i ** self.n
 
@@ -422,7 +449,8 @@ class ComputePotentials(Initialization):
             p_LJ = 4 * self.epsilon * (r12 - r6)
 
             if self.shift_energy == 'yes':
-                rc = self.r_c - self.box_length * np.round(self.r_c / self.box_length)
+                rc = self.r_c - self.box_length * \
+                    np.round(self.r_c / self.box_length)
                 rc12 = (self.epsilon / rc) ** 12
                 rc6 = (self.epsilon / rc) ** 6
                 pc_LJ = 4 * self.epsilon * (rc12 - rc6)
@@ -462,15 +490,17 @@ class ComputePotentials(Initialization):
             ij_pair = combinations(np.arange(1, self.N_particles + 1), 2)
             p_total = 0
             for p in ij_pair:
-                p_total += self.LJ_potential(coords[p[0] - 1], coords[p[1] - 1])
-            
+                p_total += self.LJ_potential(coords[p[0] - 1],
+                                             coords[p[1] - 1])
+
             if self.tail_correction == 'yes':
                 rc_term = (1 / 3) * (1 / self.r_c) ** 9 - (1 / self.r_c) ** 3
                 u_tail = (8 / 3) * np.pi * self.rho * rc_term
                 p_total += u_tail
 
         else:
-            print('Error: The type of the potential model should be either "central" or "LJ".')
+            print(
+                'Error: The type of the potential model should be either "central" or "LJ".')
             sys.exit()
 
         return p_total
@@ -483,8 +513,9 @@ class ComputePotentials(Initialization):
         for j in range(self.N_particles):
             if i != j:
                 E_pair_total += self.LJ_potential(coords[i], coords[j])
-        
+
         return E_pair_total
+
 
 class ParticleList(Initialization):
     def __init__(self, param):
@@ -495,6 +526,7 @@ class ParticleList(Initialization):
 
     def cell_list(self):
         pass
+
 
 class Thermostats(Initialization):
     def __init__(self, param):
@@ -507,11 +539,10 @@ class Thermostats(Initialization):
         pass
 
 
-
 class MonteCarlo(ComputeForces, ComputePotentials):
     def __init__(self, param_obj):
         attr_dict = vars(param_obj)
-        #print(attr_dict)
+        # print(attr_dict)
         for key in attr_dict:
             setattr(self, key, attr_dict[key])
 
@@ -520,7 +551,6 @@ class MonteCarlo(ComputeForces, ComputePotentials):
         Initialization.init_coords(self)
         #print('In MC:', self.rho)
         #print('In MC:', self.box_length)
-
 
     def metropolis_algrtm(self, coords):
         for file in os.listdir('.'):
@@ -531,51 +561,58 @@ class MonteCarlo(ComputeForces, ComputePotentials):
         # quantities at t = 0
         output0 = self.output_data(0, coords)
         outfile = open(self.traj_name, 'a+')
-        #with open(self.traj_name, 'a+', newline='') as outfile:
+        # with open(self.traj_name, 'a+', newline='') as outfile:
         outfile.write('# Output data of MC simulation\n')
         yaml.dump(output0, outfile, default_flow_style=False)
         coords_list = coords.tolist()  # to prevent line breaks when printing to the file
-        
+
         if self.print_coords != 'no':
-            outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-            outfile.write('y-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+            outfile.write(
+                'x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+            outfile.write(
+                'y-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
             if self.dimension == 3:
-                outfile.write('z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                outfile.write(
+                    'z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
 
         n_accept = 0   # for calculating the average acceptance probability
         n_trials = 0   # for calculating the instantaneous acceptance probability
-        
+
         self.p_acc = []
 
         for i in range(self.N_steps):
             n_trials += 1
-        
+
             # pick a particle, decide the random displacement and proposed new coordinates
-            i_particle = np.random.randint(self.N_particles)  # the index of the selected particle
+            # the index of the selected particle
+            i_particle = np.random.randint(self.N_particles)
 
             # Note that E_current and E_proposed are not total energies of the system
             # but the total pair energy related to the selection particle, i_particle
-            E_current = self.LJ_pair_total(coords, i_particle) # coords: current coordinates
+            # coords: current coordinates
+            E_current = self.LJ_pair_total(coords, i_particle)
 
-            # Now propose the coordinates for the selected particle 
-            d = (2 *np.random.rand(3) - 1) * self.max_d
+            # Now propose the coordinates for the selected particle
+            d = (2 * np.random.rand(3) - 1) * self.max_d
             coords_proposed = copy.deepcopy(coords)
             coords_proposed[i_particle] += d
             if self.PBC == 'yes':
-                coords_proposed[i_particle] -= self.box_length * np.round(coords_proposed[i_particle] / self.box_length)
-            
+                coords_proposed[i_particle] -= self.box_length * \
+                    np.round(coords_proposed[i_particle] / self.box_length)
+
             # Caculate the acceptance ratio based on the energy difference
             E_proposed = self.LJ_pair_total(coords_proposed, i_particle)
             delta_E = E_proposed - E_current
-            beta = 1 / self.temperature
-            
+            beta = 1 / self.t_ref
+
             # metropolis-hasting algorithm
             if delta_E < 0:
                 n_accept += 1
                 E_current += delta_E   # so now E_current = E_proposed
                 coords[i_particle] += d
                 if self.PBC == 'yes':
-                    coords -= self.box_length * np.round(coords / self.box_length)
+                    coords -= self.box_length * \
+                        np.round(coords / self.box_length)
             else:
                 # Note that we don't calculate p_acc outside the if statement
                 # since -beta * delta_E could be very large, which can cause overflow in exp
@@ -585,7 +622,8 @@ class MonteCarlo(ComputeForces, ComputePotentials):
                     E_current += delta_E   # so now E_current = E_proposed
                     coords[i_particle] += d
                     if self.PBC == 'yes':
-                        coords -= self.box_length * np.round(coords / self.box_length)
+                        coords -= self.box_length * \
+                            np.round(coords / self.box_length)
                 else:
                     pass  # so the coordinates and the energy remain the same
 
@@ -605,11 +643,14 @@ class MonteCarlo(ComputeForces, ComputePotentials):
                 yaml.dump(output, outfile, default_flow_style=False)
                 if self.print_coords != 'no':
                     coords_list = coords.tolist()  # to prevent line breaks when printing to the file
-                    outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-                    outfile.write('y-coordinates: ' + str([coords_list[i][1] for i in range(len(coords_list))]) + '\n')
+                    outfile.write(
+                        'x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                    outfile.write(
+                        'y-coordinates: ' + str([coords_list[i][1] for i in range(len(coords_list))]) + '\n')
                     if self.dimension == 3:
-                        outfile.write('z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
-        
+                        outfile.write(
+                            'z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
+
         outfile.close()
         # Note: self.p_acc[-1] = n_accept / self.N_steps --> average acceptance ratio
 
@@ -619,7 +660,8 @@ class MonteCarlo(ComputeForces, ComputePotentials):
         output = OrderedDict()
         output['Step'] = i
         if self.print_Etotal != 'no':
-            output['E_total'] = float(self.total_potential(coords))  # E_total = E_p
+            output['E_total'] = float(
+                self.total_potential(coords))  # E_total = E_p
         if self.print_pressure != 'no':
             virial = self.virial(coords)
             output['Pressure'] = float(self.pressure(virial))
@@ -656,25 +698,29 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
             yaml.dump(output0, outfile, default_flow_style=False)
             if self.print_coords != 'no':
                 coords_list = coords.tolist()  # to prevent line breaks when printing to the file
-                outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-                outfile.write('y-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                outfile.write(
+                    'x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                outfile.write(
+                    'y-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
                 if self.dimension == 3:
-                    outfile.write('z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                    outfile.write(
+                        'z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
 
         for i in range(self.N_steps):
             if self.PBC == 'yes':
                 coords -= self.box_length * np.round(coords / self.box_length)
             v_half = velocities + (self.dt / (2 * self.m)) * \
                 ComputeForces.total_force(self, coords)
-            coords = coords + v_half * self.dt  # coordinates updated (from t to t+dt)
+            # coordinates updated (from t to t+dt)
+            coords = coords + v_half * self.dt
             if self.PBC == 'yes':
                 coords -= self.box_length * np.round(coords / self.box_length)
             velocities = v_half + (self.dt / (2 * self.m)) * \
                 ComputeForces.total_force(self, coords)
-            
+
             # note that self.total_force(coords) in the line above is the total force
             # at t+dt, since the coordiantes have been updated.\
-            
+
             output = self.output_data(i + 1, velocities, coords)
             with open(self.traj_name, 'a+', newline='') as outfile:
                 if i % self.print_freq == self.print_freq - 1:
@@ -682,10 +728,13 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
                     yaml.dump(output, outfile, default_flow_style=False)
                     if self.print_coords != 'no':
                         coords_list = coords.tolist()  # to prevent line breaks when printing to the file
-                        outfile.write('x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-                        outfile.write('y-coordinates: ' + str([coords_list[i][1] for i in range(len(coords_list))]) + '\n')
+                        outfile.write(
+                            'x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                        outfile.write(
+                            'y-coordinates: ' + str([coords_list[i][1] for i in range(len(coords_list))]) + '\n')
                         if self.dimension == 3:
-                            outfile.write('z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
+                            outfile.write(
+                                'z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
 
     def output_data(self, i, velocities, coords):
         if self.PBC == 'yes':
@@ -693,19 +742,29 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
         output = OrderedDict()
         output['Step'] = i
         output['Time'] = self.dt * (i)
-        # norm(v) = sqrt{vx1^2 + vy1^2 + vx2^2 + vy2^2 + ...}
+
+        # There are a lot of ways to calculate the square of the velocities:
+        # Taking 2D velocities as an example:
+        # 1. np.linalg.norm(v) (which is sqrt{vx1^2 + vy1^2 + vx2^2 + vy2^2 + ...})
+        # 2. np.dot(v[:,0], v[:, 0]) + np.dot(v[:,1], v[:,1]) (for 2D)
+        # 3. np.sum(np.diag(np.dot(v, v.transpose())))
+        # speed: solution 2 > solution 1 >> solution 3.
         if self.print_Ek != 'no':
             output['E_k'] = float(0.5 * self.m * norm(velocities) ** 2)
         if self.print_Ep != 'no':
             output['E_p'] = float(self.total_potential(coords))
         if self.print_Etotal != 'no' and self.print_Ek != 'no' and self.print_Ep != 'no':
             output['E_total'] = float(output['E_k'] + output['E_p'])
-        
+
         # Equilipartition theorem: <2Ek> = (3N-3)kT
+        # Equil-partitiion theorem: <Ek> = (n/2) * kT, n = self.dimesion
+        # so T = (2<Ek>)/(nk) = 2* sum(Ek) / (nNk)
         if self.print_temp != 'no':
-            output['Temp'] = float((2 * output['E_k']) / ((3 * self.N_particles - 3) *self.kb))
+            output['Temp'] = float(2 * output['E_k']/(self.dimension * self.N_particles * self.kb))
+        
         if self.print_L_total != 'no':
-            output['L_total'] = float(self.angular_momentum(velocities, coords))
+            output['L_total'] = float(
+                self.angular_momentum(velocities, coords))
 
         return output
 
@@ -719,7 +778,7 @@ class TrajAnalysis:
         attr_dict = vars(param_obj)
         for key in attr_dict:
             setattr(self, key, attr_dict[key])
-    
+
         if self.simulation == 'MD':
             self.time, self.E_k, self.E_p, self.temp, self.L = [], [], [], [], []
 
@@ -753,10 +812,11 @@ class TrajAnalysis:
                 self.L.append(float(l.split(':')[1]))
             if 'Pressure: ' in l:
                 self.pressure.append(float(l.split(':')[1]))
-            
+
             if 'x-coordinates: ' in l:
                 for i in range(self.N_particles):
-                    self.x[i][len(self.step) - 1] = float(l.split(':')[1].split('[')[1].split(']')[0].split(',')[i])
+                    self.x[i][len(self.step) - 1] = float(l.split(':')
+                                                          [1].split('[')[1].split(']')[0].split(',')[i])
             if 'y-coordinates: ' in l:
                 for i in range(self.N_particles):
                     self.y[i][len(self.step) - 1] = float(l.split(':')
@@ -777,11 +837,11 @@ class TrajAnalysis:
 
     def plot_SMA(self, n, y, y_name, y_unit=None):
         # SMA: simple moving average (for time series)
-        # n: the size of the subset 
+        # n: the size of the subset
         n_points = len(y) - n + 1   # number of points
         SMA = []
         for i in range(n_points):
-            SMA.append(np.mean(np.array(y[i:i + n])))        
+            SMA.append(np.mean(np.array(y[i:i + n])))
         step = np.arange(0, self.N_steps + 1, self.print_freq)[n - 1:]
         plt.title('SMA of %s as a function of simulation step' % y_name)
         plt.plot(step, SMA)
@@ -793,7 +853,6 @@ class TrajAnalysis:
         plt.grid()
 
         return SMA
-            
 
     def plot_2d(self, y, y_name, truncate=0, y_unit=None):
         plt.figure()
@@ -811,9 +870,12 @@ class TrajAnalysis:
     def plot_MD_energy(self, truncate=0):
         plt.figure()
         x = np.arange(0, self.N_steps + 1, self.print_freq)[truncate:]
-        plt.plot(x[truncate:], np.array(self.E_k[truncate:]) / self.N_particles, label='Kinetic energy')
-        plt.plot(x[truncate:], np.array(self.E_p[truncate:]) / self.N_particles, label='Potential energy')
-        plt.plot(x[truncate:], np.array(self.E_total[truncate:]) / self.N_particles, label='Total energy')
+        plt.plot(x[truncate:], np.array(self.E_k[truncate:]) /
+                 self.N_particles, label='Kinetic energy')
+        plt.plot(x[truncate:], np.array(self.E_p[truncate:]) /
+                 self.N_particles, label='Potential energy')
+        plt.plot(x[truncate:], np.array(self.E_total[truncate:]) /
+                 self.N_particles, label='Total energy')
         plt.xlabel('Timestep')
         plt.ylabel('Energy per particle')
         plt.legend()

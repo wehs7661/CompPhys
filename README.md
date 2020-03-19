@@ -17,7 +17,7 @@ This is a repository for the class PHYS-7810: Computational Statistical Physics 
 - `box_length`: the size of the cubic simulation box
 - `rho`: the reduced number density of the particles (ignored if `box_length` is specified)
 - `temperature`: the reducd initial temperature. This must be specified in an MC simulatio but not necessarily for an MD simulatio. It it is not specified in an MD simulation, the velocities will be generted randomly.
-- `velo_method`: the method to initialize the velocities of the particles (Available options: `random` and `temp_rescale`. Default: `random`.) The option `temp_rescale` is activated only if `temperature` is specified.
+- `velo_method`: the method to initialize the velocities of the particles (Available options: `random` and `maxwell`. Default: `random`.) The option `maxwell` is activated only if `temperature` is specified.
 - `coords_method`: the method to initialize the coorinates of the particles (Available options: `random` and `lattice`. Default: `random`.)
 - `PBC`: whether the perdioc boundary conditions should be applied (Default: `yes`)
 - `max_d`: max displacement, specifically for MC simulations
@@ -39,7 +39,18 @@ This is a repository for the class PHYS-7810: Computational Statistical Physics 
   - `r_c`: cutoff distance used in energy truncation (Default: half of the box length)
   - `shift_energy`: whether to shift the truncation (Default: `no`.)
 
-  #### Completed assignments
+#### Thermostats and barostats
+
+
+
+
+#### Print options
+
+
+
+
+
+#### Completed assignments
   As a record, the following tutorials, assignments and exercises are all completed:
   - Tutorial_01, Tutorial_02, Tutorial_03, Tutorial_04. 
   - Homework_01, Homework_02, Homework_03. (All are completed.)
