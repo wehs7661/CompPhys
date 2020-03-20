@@ -134,6 +134,15 @@ class Initialization:
                 print('box_length: %s, r_c: %s' % (self.box_length, self.r_c))
                 sys.exit()
 
+        self.examine_params('search_method', False, 'all-pairs')
+        if self.search_method == 'verlet':
+            self.examine_params('delta', False, 0.2)
+            self.r_v = self.delta + self.r_c
+            if self.delta + self.r_c >= self.box_length * 0.5:  # r_v should < L/2
+                print('Error! Cutoff distance for Verlet list (r_v) should be smaller than L/2.')
+                print('r_c = %5.3f, delta = %5.3f, r_v = r_c + delta = %5.3f, L/2 = %5.3f' %(self.r_c, self.delta, self.r_v, 0.5 * self.box_length))
+                sys.exit()
+
         # print options
         self.examine_params('print_coords', False, 'yes')
         self.examine_params('print_Ek', False, 'yes')
@@ -304,7 +313,7 @@ class ComputeForces(Initialization):
 
         return f_LJ
 
-    def total_force(self, coords):
+    def total_force(self, coords, prtcl_list=None):
         """
         This function calculates the total force of all the particles given the coordinates
         of all the particles, which is an array of f_ext_i + sum_{j=i+1}^{N}(f_int_ij), where 
@@ -343,20 +352,48 @@ class ComputeForces(Initialization):
             f_total = f_int_total + f_ext
         
         if self.potential == 'LJ' or self.potential == 'WCA':
+
             f_matrix = np.zeros([self.dimension, self.N_particles, self.N_particles])
             # f_matrix[k, i, j] = k compoent of interaction acting on particle i by particle j
             # Note that the diagonal (fii) should be 0, so we'll just leave it there
             # Here we first calculate half of the matrix (j < i) for each k, since the matrix is symmetric
             for i in range(self.N_particles):
-                for j in range(self.N_particles):
+
+                if self.search_method == 'all-pairs':
+                    loop_range = range(self.N_particles)
+                elif self.search_method == 'verlet':
+                    loop_range = range(len(prtcl_list[i]))
+                    loop_range = prtcl_list[i]
+
+                for j in loop_range:
                     if j < i:
                         f_matrix[:, i, j] = self.LJ_force_ij(coords[i], coords[j])
                     elif j > i:
-                        break   # break the loop once cross the diagonal
-              
+                        break   # break the loop once cross the diagonal to prevent repeptive calculation
+            
             # then we finish the contruction of the symmetric matrix for each component
             for i in range(self.dimension):
                 f_matrix[i] = -(f_matrix[i] -  f_matrix[i].transpose())
+
+            allpair = np.zeros([self.dimension, self.N_particles, self.N_particles])
+            for i in range(self.N_particles):
+                loop_range = range(self.N_particles)
+                for j in loop_range:
+                    if j < i:
+                        allpair[:, i, j] = self.LJ_force_ij(coords[i], coords[j])
+                    elif j > i:
+                        break   # break the loop once cross the diagonal to prevent repeptive calculation
+            
+            # then we finish the contruction of the symmetric matrix for each component
+            for i in range(self.dimension):
+                allpair[i] = -(allpair[i] -  allpair[i].transpose())
+
+            #print(allpair[0])
+            #print('\n')
+            #print(f_matrix[0])
+            #print(allpair[0] == f_matrix[0])
+            #print((allpair == f_matrix).all())
+            #sys.exit()
 
             # At last, calculate f_total for particle i
             f_total = np.zeros([self.N_particles, self.dimension])
@@ -518,8 +555,20 @@ class ParticleList(Initialization):
     def __init__(self, param):
         Initialization.__init__(self, param)
 
-    def verlet_list(self):
-        pass
+    def verlet_list(self, coords):
+        self.r_v = self.delta + self.r_c
+        v_list = []
+        for i in range(self.N_particles):
+            v_list.append([])  # initiliaze an empty list for each particle
+
+        for i in range(self.N_particles - 1):
+            for j in range(i + 1, self.N_particles):
+                r_ij = self.calc_dist(coords[i], coords[j]) # PBC considered in calc_dist
+                if r_ij < self.r_v:
+                    v_list[i].append(j)
+                    v_list[j].append(i)
+
+        return v_list
 
     def cell_list(self):
         pass
@@ -666,7 +715,7 @@ class MonteCarlo(ComputeForces, ComputePotentials):
         return output
 
 
-class MolecularDynamics(ComputeForces, ComputePotentials):
+class MolecularDynamics(ComputeForces, ComputePotentials, ParticleList):
     def __init__(self, param_obj):
         attr_dict = vars(param_obj)
         for key in attr_dict:
@@ -703,20 +752,50 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
                     outfile.write(
                         'z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
 
+        # start the verlet integration
         for i in range(self.N_steps):
-            if self.PBC == 'yes':
-                coords -= self.box_length * np.round(coords / self.box_length)
-            v_half = velocities + (self.dt / (2 * self.m)) * \
-                ComputeForces.total_force(self, coords)
-            # coordinates updated (from t to t+dt)
-            coords = coords + v_half * self.dt
-            if self.PBC == 'yes':
-                coords -= self.box_length * np.round(coords / self.box_length)
-            velocities = v_half + (self.dt / (2 * self.m)) * \
-                ComputeForces.total_force(self, coords)
+            if self.search_method == 'all-pairs':
+                if self.PBC == 'yes':
+                    coords -= self.box_length * np.round(coords / self.box_length)
+                v_half = velocities + (self.dt / (2 * self.m)) * \
+                    ComputeForces.total_force(self, coords)
+                # coordinates updated (from t to t+dt)
+                coords = coords + v_half * self.dt
+                if self.PBC == 'yes':
+                    coords -= self.box_length * np.round(coords / self.box_length)
+                velocities = v_half + (self.dt / (2 * self.m)) * \
+                    ComputeForces.total_force(self, coords)
 
-            # note that self.total_force(coords) in the line above is the total force
-            # at t+dt, since the coordiantes have been updated.\
+                # note that self.total_force(coords) in the line above is the total force
+                # at t+dt, since the coordiantes have been updated.\
+            
+            elif self.search_method == 'verlet':
+                if self.PBC == 'yes':
+                    coords -= self.box_length * np.round(coords / self.box_length)
+                vlist = ParticleList.verlet_list(self, coords)
+                coords_old = copy.deepcopy(coords)
+
+                v_half = velocities + (self.dt / (2 * self.m)) * \
+                    ComputeForces.total_force(self, coords, vlist)
+                coords = coords + v_half * self.dt
+                if self.PBC == 'yes':
+                    coords -= self.box_length * np.round(coords / self.box_length)
+                coords_new = copy.deepcopy(coords)
+
+                # check if the verlet list need to be updated
+                d_vec = coords_new - coords_old
+                d_max = max([norm(d_vec[i]) for i in range(len(d_vec))])
+                if d_max >= self.delta * 0.5:
+                    vlist = ParticleList.verlet_list(self, coords)
+                velocities = v_half + (self.dt / (2 * self.m)) * \
+                    ComputeForces.total_force(self, coords, vlist)
+
+            elif self.search_method == 'cell':
+                pass
+
+            else:
+                print('Error! The search method should be "all-pairs", "verlet", or "cell".')
+                sys.exit()
 
             # Application of thermostat
             if self.tcoupl == 'Andersen' and i % self.nst_toupl - 1:
@@ -726,9 +805,15 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
                 # select 4 particle first and there is a 30% chance that we select one more particle.
                 
                 selected_idx = np.random.randint(0, self.N_particles - 1, n_selected_int)
+                # draw samples from np.arange(0, self.N_particles)
+                selected_idx = np.random.choice(self.N_particles - 1, n_selected_int, replace=False)
                 if n_selected - n_selected_int != 0:
                     if np.random.rand() < n_selected - n_selected_int:
-                        selected_idx = np.concatenate(selected_idx, np.random.randint(0, self.N_particles - 1, 1))
+                        candidates = list(np.arange(0, self.N_particles - 1))
+                        for i in sorted(selected_idx, reverse=True):  # from big to small
+                            del candidates[i]   # delete index i, that's why we sorted selected_idx
+                        add_idx = np.random.choice(candidates, 1, replace=False)
+                        selected_idx = np.concatenate((selected_idx, add_idx))
 
                 sigma = np.sqrt(self.kb * self.t_ref / self.m)   # on the other hand, mean is set to 0
                 for idx in range(len(selected_idx)):
@@ -879,7 +964,6 @@ class TrajAnalysis:
             plt.ylabel('%s (%s)' % (y_name, y_unit))
         plt.grid()
         print('The average of the last subset: %s' %SMA[-1])
-
 
     def plot_2d(self, y, y_name, truncate=0, y_unit=None):
         plt.figure()

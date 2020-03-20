@@ -1,9 +1,10 @@
 # Adopted simulation parameters
-N_particles: 6
-N_steps: 50000
+N_particles: 50
+N_steps: 800
 PBC: 'yes'
-box_length: 2.7386127875258306
+box_length: 7.905694150420948
 coords_method: lattice
+delta: 0.3
 dimension: 2
 dt: 0.001
 energy_truncation: 'yes'
@@ -15,19 +16,20 @@ nst_toupl: 10
 potential: WCA
 print_Ek: 'no'
 print_Ep: 'no'
-print_Etotal: 'yes'
+print_Etotal: 'no'
 print_L_total: 'no'
 print_coords: 'no'
 print_freq: 10
-print_pressure: 'yes'
+print_pressure: 'no'
 print_temp: 'yes'
 r_c: 1.122462048309373
 r_min: 1.122462048309373
 rho: 0.8
+search_method: all-pairs
 shift_energy: 'yes'
 sigma: 1
 simulation: MD
 t_ref: 0.6
 tail_correction: 'no'
-tcoupl: Andersen
+tcoupl: 'no'
 velo_method: maxwell
