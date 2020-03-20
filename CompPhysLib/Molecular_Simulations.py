@@ -118,6 +118,7 @@ class Initialization:
 
         if self.tcoupl == 'Andersen':
             self.examine_params('mu', False, 5)
+            self.examine_params('nst_toupl', False, 100)
             self.examine_params('t_ref', True)
 
         if self.energy_truncation == 'yes':
@@ -233,8 +234,7 @@ class Initialization:
             """
         
         else:
-            print(
-                'Error: The method for initializing the velocities should be either "random" or "maxwell".')
+            print('Error: The method for initializing the velocities should be either "random" or "maxwell".')
             sys.exit()
 
     def calc_dist(self, coord_i, coord_j):
@@ -350,9 +350,6 @@ class ComputeForces(Initialization):
             for i in range(self.N_particles):
                 for j in range(self.N_particles):
                     if j < i:
-                        #print(coords[i])
-                        #print(coords[j])
-                        #print(self.LJ_force_ij(coords[i], coords[j]))
                         f_matrix[:, i, j] = self.LJ_force_ij(coords[i], coords[j])
                     elif j > i:
                         break   # break the loop once cross the diagonal
@@ -721,6 +718,26 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
             # note that self.total_force(coords) in the line above is the total force
             # at t+dt, since the coordiantes have been updated.\
 
+            # Application of thermostat
+            if self.tcoupl == 'Andersen' and i % self.nst_toupl - 1:
+                n_selected = self.N_particles * self.mu * (self.nst_toupl * self.dt)    # the number of selected particles
+                n_selected_int = int(np.floor(n_selected))
+                # Note that n_selected could be a floating number. For example, if it is 4.3, we'll
+                # select 4 particle first and there is a 30% chance that we select one more particle.
+                
+                selected_idx = np.random.randint(0, self.N_particles - 1, n_selected_int)
+                if n_selected - n_selected_int != 0:
+                    if np.random.rand() < n_selected - n_selected_int:
+                        selected_idx = np.concatenate(selected_idx, np.random.randint(0, self.N_particles - 1, 1))
+
+                sigma = np.sqrt(self.kb * self.t_ref / self.m)   # on the other hand, mean is set to 0
+                for idx in range(len(selected_idx)):
+                    # collision with the heat bath
+                    velocities[[selected_idx]] = np.random.normal(0, sigma, [len(selected_idx), self.dimension])
+                    # If A = array([49, 76, 55, 23, 31,  9, 35, 33,  0, 28]) and B = array([-6, -8])
+                    # then after A[[3, 5]] = B, A becomes array([49, 76, 55, -6, 31, -8, 35, 33,  0, 28])
+                    # This also applies for multi-dimensional arrays like we have here.
+
             output = self.output_data(i + 1, velocities, coords)
             with open(self.traj_name, 'a+', newline='') as outfile:
                 if i % self.print_freq == self.print_freq - 1:
@@ -754,14 +771,24 @@ class MolecularDynamics(ComputeForces, ComputePotentials):
         if self.print_Ep != 'no':
             output['E_p'] = float(self.total_potential(coords))
         if self.print_Etotal != 'no' and self.print_Ek != 'no' and self.print_Ep != 'no':
-            output['E_total'] = float(output['E_k'] + output['E_p'])
+            if self.print_Ek == 'yes' and self.print_Ep == 'yes':
+                output['E_total'] = float(output['E_k'] + output['E_p'])
+            else:
+                output['E_total'] = float(0.5 * self.m * norm(velocities) ** 2) + float(self.total_potential(coords))
 
         # Equilipartition theorem: <2Ek> = (3N-3)kT
         # Equil-partitiion theorem: <Ek> = (n/2) * kT, n = self.dimesion
         # so T = (2<Ek>)/(nk) = 2* sum(Ek) / (nNk)
         if self.print_temp != 'no':
-            output['Temp'] = float(2 * output['E_k']/(self.dimension * self.N_particles * self.kb))
-        
+            if self.print_Ek == 'yes':
+                output['Temp'] = float(2 * output['E_k']/(self.dimension * self.N_particles * self.kb))
+            else: 
+                output['Temp'] = 2 * float(0.5 * self.m * norm(velocities) ** 2) / (self.dimension * self.N_particles * self.kb)
+
+        if self.print_pressure != 'no':
+            virial = self.virial(coords)
+            output['Pressure'] = float(self.pressure(virial))
+
         if self.print_L_total != 'no':
             output['L_total'] = float(
                 self.angular_momentum(velocities, coords))
@@ -851,8 +878,8 @@ class TrajAnalysis:
         else:
             plt.ylabel('%s (%s)' % (y_name, y_unit))
         plt.grid()
+        print('The average of the last subset: %s' %SMA[-1])
 
-        return SMA
 
     def plot_2d(self, y, y_name, truncate=0, y_unit=None):
         plt.figure()

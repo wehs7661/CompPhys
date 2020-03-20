@@ -1,7 +1,7 @@
 # Simulation parameters
 simulation: MD
-N_particles: 4
-N_steps: 10000
+N_particles: 6
+N_steps: 50000
 dt: 0.001
 m: 1
 r_c: 2.5 # the distance cutoff for the interaction potential (r_c = 0 : no truncation)
@@ -20,15 +20,16 @@ tail_correction: 'no'
 
 # thermostats and barostats
 tcoupl: 'Andersen'  # availale option: no (default), Andersen
-mu: 5               # the collision rate of Andersen thermostat 
+mu: 50               # the collision rate of Andersen thermostat 
 t_ref: 0.6          # can be used in NVT MC without barostats
+nst_toupl: 10       # frequency to apply thermostat
 
 # print options
 print_freq: 10
-print_coords: 'yes'
-print_Ek: 'yes'
-print_Ep: 'yes'
+print_coords: 'no'
+print_Ek: 'no'
+print_Ep: 'no'
 print_Etotal: 'yes'
 print_temp: 'yes'
-print_pressure: 'no'
+print_pressure: 'yes'
 print_L_total: 'no'
