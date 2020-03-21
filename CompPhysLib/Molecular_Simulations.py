@@ -162,9 +162,9 @@ class Initialization:
                 # make the the output file is newly made
                 os.remove(out_param_name)
 
-        with open(out_param_name, 'a+', newline='') as out_params:
-            out_params.write('# Adopted simulation parameters\n')
-            yaml.dump(adopted_params, out_params, default_flow_style=False)
+        out_params = open(out_param_name, 'a+', newline='')
+        out_params.write('# Adopted simulation parameters\n')
+        yaml.dump(adopted_params, out_params, default_flow_style=False)
 
         # Step 3: Add other attributes
         self.prefix = param.split('.')[0]
@@ -241,7 +241,10 @@ class Initialization:
             # multiply by f: set initial kinetic energy to 1.5kbT (in 3D) or kbT (in 2D)
             self.velocities = (self.velocities - mean_v) * f
             """
-        
+
+        elif self.velo_method == 'debug':
+            self.velocities = np.ones([self.N_particles, self.dimension])
+
         else:
             print('Error: The method for initializing the velocities should be either "random" or "maxwell".')
             sys.exit()
@@ -303,8 +306,7 @@ class ComputeForces(Initialization):
             r6 = (self.epsilon / r_ij) ** 6
             r_ij_vec = (coord_i - coord_j)
             if self.PBC == 'yes':
-                r_ij_vec -= self.box_length * \
-                    np.round(r_ij_vec / self.box_length)
+                r_ij_vec -= self.box_length * np.round(r_ij_vec / self.box_length)
             f_LJ[:] = r_ij_vec * (48 * self.epsilon /
                                   (r_ij ** 2)) * (r12 - 0.5 * r6)
 
@@ -319,8 +321,9 @@ class ComputeForces(Initialization):
         of all the particles, which is an array of f_ext_i + sum_{j=i+1}^{N}(f_int_ij), where 
         i ranges from 1 to the number of particles
         """
-        if self.PBC == 'yes':
-            coords -= self.box_length * np.round(coords / self.box_length)
+        # Note that there is no need to apply PBC here. PBC will be applied outside the function
+        # whenever it is needed. For example, in verlet integration, coords are the same for the last
+        # step of n intergration and the first step in (n+1) integration. --> no need to apply PBC for both.
 
         if self.potential == 'central':
             # Step 1: First calculate the interaction force of each pair and store in a dictionary
@@ -362,7 +365,6 @@ class ComputeForces(Initialization):
                 if self.search_method == 'all-pairs':
                     loop_range = range(self.N_particles)
                 elif self.search_method == 'verlet':
-                    loop_range = range(len(prtcl_list[i]))
                     loop_range = prtcl_list[i]
 
                 for j in loop_range:
@@ -374,26 +376,6 @@ class ComputeForces(Initialization):
             # then we finish the contruction of the symmetric matrix for each component
             for i in range(self.dimension):
                 f_matrix[i] = -(f_matrix[i] -  f_matrix[i].transpose())
-
-            allpair = np.zeros([self.dimension, self.N_particles, self.N_particles])
-            for i in range(self.N_particles):
-                loop_range = range(self.N_particles)
-                for j in loop_range:
-                    if j < i:
-                        allpair[:, i, j] = self.LJ_force_ij(coords[i], coords[j])
-                    elif j > i:
-                        break   # break the loop once cross the diagonal to prevent repeptive calculation
-            
-            # then we finish the contruction of the symmetric matrix for each component
-            for i in range(self.dimension):
-                allpair[i] = -(allpair[i] -  allpair[i].transpose())
-
-            #print(allpair[0])
-            #print('\n')
-            #print(f_matrix[0])
-            #print(allpair[0] == f_matrix[0])
-            #print((allpair == f_matrix).all())
-            #sys.exit()
 
             # At last, calculate f_total for particle i
             f_total = np.zeros([self.N_particles, self.dimension])
@@ -411,8 +393,7 @@ class ComputeForces(Initialization):
         This function calculates the total magnitude of the angular momenta of the system.
         In this case, when r and p are both 2-D numpy array, magnitude of L = norm(np.cross(r, p))
         """
-        if self.PBC == 'yes':
-            coords -= self.box_length * np.round(coords / self.box_length)
+        # Note that PBC will be applied outside the function
         L_vec = np.cross(coords, velocities)
         L_total = 0
         for i in range(self.N_particles):
@@ -420,18 +401,24 @@ class ComputeForces(Initialization):
 
         return norm(L_total)
 
-    def virial(self, coords):
-        ij_pair = combinations(np.arange(1, self.N_particles + 1), 2)
+    def virial(self, coords, prtcl_list=None):
         virial = 0
-        for p in ij_pair:
-            r_ij_vec = coords[p[0] - 1] - coords[p[1] - 1]
-            if self.PBC == 'yes':
-                r_ij_vec -= self.box_length * \
-                    np.round(r_ij_vec / self.box_length)
-            f_ij_vec = self.LJ_force_ij(coords[p[0] - 1], coords[p[1] - 1])
-            virial += np.dot(f_ij_vec, r_ij_vec)
+        for i in range(self.N_particles):
 
-        virial *= (1/3)
+            if self.search_method == 'all-pairs':
+                loop_range = range(self.N_particles)
+            elif self.search_method == 'verlet':
+                loop_range = prtcl_list[i]
+            
+            for j in loop_range:
+                if j < i:
+                    r_ij_vec = coords[i] - coords[j]
+                    if self.PBC == 'yes':
+                        r_ij_vec -= self.box_length * np.round(r_ij_vec / self.box_length)
+                    f_ij_vec = self.LJ_force_ij(coords[i], coords[j])
+                    virial += np.dot(f_ij_vec, r_ij_vec)
+
+        virial *= (1/self.dimension)
 
         return virial
 
@@ -494,9 +481,8 @@ class ComputePotentials(Initialization):
 
         return p_LJ
 
-    def total_potential(self, coords):
-        if self.PBC == 'yes':
-            coords -= self.box_length * np.round(coords / self.box_length)
+    def total_potential(self, coords, prtcl_list=None):
+        # Note that PBC will be applied to coords before coords is input to this method.
 
         if self.potential == 'central':
             # Step 1: calculate \sum_{i=1}^{N-1} \sum_{j=i+1}^{N} ar_{ij}^{-k}
@@ -521,11 +507,19 @@ class ComputePotentials(Initialization):
             # note that combinations returns a generator which produces its values when needed
             # instead of calculating everything at once and storing the result in memory.
             # Therefore, we don't use ij_pair = list(combinations(...)) and loop over the list, which is slower.
-            ij_pair = combinations(np.arange(1, self.N_particles + 1), 2)
             p_total = 0
-            for p in ij_pair:
-                p_total += self.LJ_potential(coords[p[0] - 1],
-                                             coords[p[1] - 1])
+            for i in range(self.N_particles):
+                
+                if self.search_method == 'all-pairs':
+                    loop_range = range(self.N_particles)
+                elif self.search_method == 'verlet':
+                    loop_range = prtcl_list[i]
+                
+                for j in loop_range:
+                    if j < i:
+                        p_total += self.LJ_potential(coords[i], coords[j])
+                    elif j > i:
+                        break
 
             if self.tail_correction == 'yes':
                 rc_term = (1 / 3) * (1 / self.r_c) ** 9 - (1 / self.r_c) ** 3
@@ -607,7 +601,6 @@ class MonteCarlo(ComputeForces, ComputePotentials):
         # quantities at t = 0
         output0 = self.output_data(0, coords)
         outfile = open(self.traj_name, 'a+')
-        # with open(self.traj_name, 'a+', newline='') as outfile:
         outfile.write('# Output data of MC simulation\n')
         yaml.dump(output0, outfile, default_flow_style=False)
         coords_list = coords.tolist()  # to prevent line breaks when printing to the file
@@ -736,27 +729,35 @@ class MolecularDynamics(ComputeForces, ComputePotentials, ParticleList):
                 # make the the output file is newly made
                 os.remove(self.traj_name)
 
-        # quantities at t = 0
-        output0 = self.output_data(0, velocities, coords)
+        # initial coords are certainly in the box. No need to apply PBC
+        # initial verlet list
+        if self.search_method == 'verlet':
+            vlist = ParticleList.verlet_list(self, coords)
+            coords_old = copy.deepcopy(coords)
 
-        with open(self.traj_name, 'a+', newline='') as outfile:
-            outfile.write('# Output data of MD simulation\n')
-            yaml.dump(output0, outfile, default_flow_style=False)
-            if self.print_coords != 'no':
-                coords_list = coords.tolist()  # to prevent line breaks when printing to the file
+        # quantities at t = 0
+        if self.search_method == 'all-pairs':
+            output0 = self.output_data(0, velocities, coords)
+        elif self.search_method == 'verlet':
+            output0 = self.output_data(0, velocities, coords, vlist)
+
+        outfile = open(self.traj_name, 'a+', newline='')
+        outfile.write('# Output data of MD simulation\n')
+        yaml.dump(output0, outfile, default_flow_style=False)
+        if self.print_coords != 'no':
+            coords_list = coords.tolist()  # to prevent line breaks when printing to the file
+            outfile.write(
+                'x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+            outfile.write(
+                'y-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+            if self.dimension == 3:
                 outfile.write(
-                    'x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-                outfile.write(
-                    'y-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-                if self.dimension == 3:
-                    outfile.write(
-                        'z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                    'z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
 
         # start the verlet integration
+        # Note that PBC has been applied in total_force
         for i in range(self.N_steps):
             if self.search_method == 'all-pairs':
-                if self.PBC == 'yes':
-                    coords -= self.box_length * np.round(coords / self.box_length)
                 v_half = velocities + (self.dt / (2 * self.m)) * \
                     ComputeForces.total_force(self, coords)
                 # coordinates updated (from t to t+dt)
@@ -770,11 +771,6 @@ class MolecularDynamics(ComputeForces, ComputePotentials, ParticleList):
                 # at t+dt, since the coordiantes have been updated.\
             
             elif self.search_method == 'verlet':
-                if self.PBC == 'yes':
-                    coords -= self.box_length * np.round(coords / self.box_length)
-                vlist = ParticleList.verlet_list(self, coords)
-                coords_old = copy.deepcopy(coords)
-
                 v_half = velocities + (self.dt / (2 * self.m)) * \
                     ComputeForces.total_force(self, coords, vlist)
                 coords = coords + v_half * self.dt
@@ -786,7 +782,11 @@ class MolecularDynamics(ComputeForces, ComputePotentials, ParticleList):
                 d_vec = coords_new - coords_old
                 d_max = max([norm(d_vec[i]) for i in range(len(d_vec))])
                 if d_max >= self.delta * 0.5:
+                    # coords_old only have to be updated if the list is updated
+                    # so that we can accumulate the displacement 
                     vlist = ParticleList.verlet_list(self, coords)
+                    coords_old = copy.deepcopy(coords)
+
                 velocities = v_half + (self.dt / (2 * self.m)) * \
                     ComputeForces.total_force(self, coords, vlist)
 
@@ -823,24 +823,24 @@ class MolecularDynamics(ComputeForces, ComputePotentials, ParticleList):
                     # then after A[[3, 5]] = B, A becomes array([49, 76, 55, -6, 31, -8, 35, 33,  0, 28])
                     # This also applies for multi-dimensional arrays like we have here.
 
-            output = self.output_data(i + 1, velocities, coords)
-            with open(self.traj_name, 'a+', newline='') as outfile:
-                if i % self.print_freq == self.print_freq - 1:
-                    outfile.write("\n")
-                    yaml.dump(output, outfile, default_flow_style=False)
-                    if self.print_coords != 'no':
-                        coords_list = coords.tolist()  # to prevent line breaks when printing to the file
+            if self.search_method == 'all-pairs':
+                output = self.output_data(i + 1, velocities, coords)
+            elif self.search_method == 'verlet':
+                output = self.output_data(i + 1, velocities, coords, vlist)
+            if i % self.print_freq == self.print_freq - 1:
+                outfile.write("\n")
+                yaml.dump(output, outfile, default_flow_style=False)
+                if self.print_coords != 'no':
+                    coords_list = coords.tolist()  # to prevent line breaks when printing to the file
+                    outfile.write(
+                        'x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                    outfile.write(
+                        'y-coordinates: ' + str([coords_list[i][1] for i in range(len(coords_list))]) + '\n')
+                    if self.dimension == 3:
                         outfile.write(
-                            'x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
-                        outfile.write(
-                            'y-coordinates: ' + str([coords_list[i][1] for i in range(len(coords_list))]) + '\n')
-                        if self.dimension == 3:
-                            outfile.write(
-                                'z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
+                            'z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
 
-    def output_data(self, i, velocities, coords):
-        if self.PBC == 'yes':
-            coords -= self.box_length * np.round(coords / self.box_length)
+    def output_data(self, i, velocities, coords, prtcl_list=None):
         output = OrderedDict()
         output['Step'] = i
         output['Time'] = self.dt * (i)
@@ -854,12 +854,12 @@ class MolecularDynamics(ComputeForces, ComputePotentials, ParticleList):
         if self.print_Ek != 'no':
             output['E_k'] = float(0.5 * self.m * norm(velocities) ** 2)
         if self.print_Ep != 'no':
-            output['E_p'] = float(self.total_potential(coords))
+            output['E_p'] = float(self.total_potential(coords, prtcl_list))
         if self.print_Etotal != 'no' and self.print_Ek != 'no' and self.print_Ep != 'no':
             if self.print_Ek == 'yes' and self.print_Ep == 'yes':
                 output['E_total'] = float(output['E_k'] + output['E_p'])
             else:
-                output['E_total'] = float(0.5 * self.m * norm(velocities) ** 2) + float(self.total_potential(coords))
+                output['E_total'] = float(0.5 * self.m * norm(velocities) ** 2) + float(self.total_potential(coords, prtcl_list))
 
         # Equilipartition theorem: <2Ek> = (3N-3)kT
         # Equil-partitiion theorem: <Ek> = (n/2) * kT, n = self.dimesion
@@ -871,7 +871,7 @@ class MolecularDynamics(ComputeForces, ComputePotentials, ParticleList):
                 output['Temp'] = 2 * float(0.5 * self.m * norm(velocities) ** 2) / (self.dimension * self.N_particles * self.kb)
 
         if self.print_pressure != 'no':
-            virial = self.virial(coords)
+            virial = self.virial(coords, prtcl_list)
             output['Pressure'] = float(self.pressure(virial))
 
         if self.print_L_total != 'no':
