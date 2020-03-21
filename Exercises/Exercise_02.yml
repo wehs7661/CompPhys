@@ -1,7 +1,7 @@
 # Simulation parameters
 simulation: MD
-N_particles: 9
-N_steps: 10000
+N_particles: 200
+N_steps: 0
 dt: 0.001
 m: 1
 r_c: 2.5 # the distance cutoff for the interaction potential (r_c = 0 : no truncation)
@@ -13,7 +13,7 @@ dimension: 2
 potential: 'WCA'
 PBC: 'yes'
 coords_method: 'lattice'  
-velo_method: 'maxwell'
+velo_method: 'debug'
 energy_truncation: 'yes'
 shift_energy: 'yes'
 tail_correction: 'no'
@@ -25,12 +25,12 @@ t_ref: 0.8          # can be used in NVT MC without barostats
 nst_toupl: 10       # frequency to apply thermostat
 
 # searching method
-search_method: 'all-pairs'
+search_method: 'cell'
 delta: 0.37753795      # the neighbor list skin, delta = r_v-r_c
 
 # print options
-print_freq: 50
-print_coords: 'no'
+print_freq: 1
+print_coords: 'yes'
 print_Ek: 'yes'
 print_Ep: 'yes'
 print_Etotal: 'yes'

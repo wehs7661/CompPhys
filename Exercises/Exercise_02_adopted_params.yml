@@ -1,8 +1,8 @@
 # Adopted simulation parameters
-N_particles: 9
-N_steps: 10000
+N_particles: 2000
+N_steps: 0
 PBC: 'yes'
-box_length: 3.3541019662496847
+box_length: 50.0
 coords_method: lattice
 delta: 0.37753795
 dimension: 2
@@ -18,18 +18,19 @@ print_Ek: 'yes'
 print_Ep: 'yes'
 print_Etotal: 'yes'
 print_L_total: 'no'
-print_coords: 'no'
-print_freq: 50
+print_coords: 'yes'
+print_freq: 1
 print_pressure: 'no'
 print_temp: 'no'
 r_c: 1.122462048309373
+r_cell: 1.2347082531403104
 r_min: 1.122462048309373
 rho: 0.8
-search_method: all-pairs
+search_method: cell
 shift_energy: 'yes'
 sigma: 1
 simulation: MD
 t_ref: 0.8
 tail_correction: 'no'
 tcoupl: 'no'
-velo_method: maxwell
+velo_method: debug

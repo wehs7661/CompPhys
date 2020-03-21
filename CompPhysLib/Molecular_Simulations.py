@@ -143,6 +143,9 @@ class Initialization:
                 print('r_c = %5.3f, delta = %5.3f, r_v = r_c + delta = %5.3f, L/2 = %5.3f' %(self.r_c, self.delta, self.r_v, 0.5 * self.box_length))
                 sys.exit()
 
+        if self.search_method == 'cell':
+            self.examine_params('r_cell', False, self.r_c * 1.1)
+
         # print options
         self.examine_params('print_coords', False, 'yes')
         self.examine_params('print_Ek', False, 'yes')
@@ -194,14 +197,12 @@ class Initialization:
                 setattr(self, var, default)
 
     def init_coords(self):
-        #print('In Init:', self.rho)
-        #print('In Init:', self.box_length)
         if self.coords_method == 'random':
             self.coords = (0.5 - np.random.rand(self.N_particles,
                                                 self.dimension)) * self.box_length  # initial coordinates
         elif self.coords_method == 'lattice':
             # number of grids per side of the lattice
-            N = np.ceil((self.N_particles)**(1 / self.dimension))
+            N = np.ceil((self.N_particles)**(1 / self.dimension)) # number of particles per side
             r_min = -self.box_length / 2
             r_max = self.box_length / 2
             self.d = self.box_length / N   # initial spacing between particles
@@ -355,7 +356,6 @@ class ComputeForces(Initialization):
             f_total = f_int_total + f_ext
         
         if self.potential == 'LJ' or self.potential == 'WCA':
-
             f_matrix = np.zeros([self.dimension, self.N_particles, self.N_particles])
             # f_matrix[k, i, j] = k compoent of interaction acting on particle i by particle j
             # Note that the diagonal (fii) should be 0, so we'll just leave it there
@@ -364,14 +364,24 @@ class ComputeForces(Initialization):
 
                 if self.search_method == 'all-pairs':
                     loop_range = range(self.N_particles)
-                elif self.search_method == 'verlet':
+                elif self.search_method == 'verlet' or 'cell':
                     loop_range = prtcl_list[i]
 
                 for j in loop_range:
-                    if j < i:
-                        f_matrix[:, i, j] = self.LJ_force_ij(coords[i], coords[j])
-                    elif j > i:
-                        break   # break the loop once cross the diagonal to prevent repeptive calculation
+                    if self.search_method == 'all-pairs' or 'verlet':
+                        if j < i:
+                            f_matrix[:, i, j] = self.LJ_force_ij(coords[i], coords[j])
+                        elif j > i:
+                            break   # break the loop once cross the diagonal to prevent repeptive calculation
+                    
+                    if self.search_method == 'cell':
+                        if i != j:
+                            f_matrix[:, i, j] = self.LJ_force_ij(coords[i], coords[j])
+                        # since only half of the neighbors were considered in neighbor_cells
+                        # looping over the whole cell list should give half (instead of the whole)
+                        # f_matrix. Note that for vlist = [[0, 4, 5], ...], particle 0 must apppear
+                        # in the list of partcile 4. However, if clist = [0, 4, 5], particle 0 should not 
+                        # appear in the list of particle 4. This is the difference between clist and vlist.
             
             # then we finish the contruction of the symmetric matrix for each component
             for i in range(self.dimension):
@@ -508,18 +518,28 @@ class ComputePotentials(Initialization):
             # instead of calculating everything at once and storing the result in memory.
             # Therefore, we don't use ij_pair = list(combinations(...)) and loop over the list, which is slower.
             p_total = 0
+            # print(prtcl_list)  # worthy to take a look
+            ij = []
             for i in range(self.N_particles):
                 
                 if self.search_method == 'all-pairs':
                     loop_range = range(self.N_particles)
                 elif self.search_method == 'verlet':
                     loop_range = prtcl_list[i]
+                elif self.search_method == 'cell':
+                    loop_range = prtcl_list[i]
                 
                 for j in loop_range:
-                    if j < i:
+                    
+                    if self.search_method == 'all-pairs' or self.search_method == 'verlet':
+                        if j < i:
+                            ij.append([i, j, self.LJ_potential(coords[i], coords[j])])
+                            p_total += self.LJ_potential(coords[i], coords[j])
+                        elif j > i:
+                            break
+                    if self.search_method == 'cell':
+                        ij.append([i, j, self.LJ_potential(coords[i], coords[j])])
                         p_total += self.LJ_potential(coords[i], coords[j])
-                    elif j > i:
-                        break
 
             if self.tail_correction == 'yes':
                 rc_term = (1 / 3) * (1 / self.r_c) ** 9 - (1 / self.r_c) ** 3
@@ -564,9 +584,98 @@ class ParticleList(Initialization):
 
         return v_list
 
-    def cell_list(self):
-        pass
+    def cell_list(self, coords):
+        # Given the coordinates of particles, this method identify the interacting 
+        # particles in the same cell or  half of the neighboring cells defined in 
+        # neighbors_cells. A cell list like [[2, 3, 7, 18], [5, 6, 4], ...] means
+        # that partcile 0 interacts with particle 2, 3, 7, 10, which are either 
+        # in the same or the neighbor cells of the cell  that particle 0 belongs to.
+        # Interacting particles of particle i do not include the particle i itself.
+        
+        c_list = []
+        for i in range(self.N_particles):
+            c_list.append([])
 
+        cells = self.all_cells(coords)
+
+        for i in range(self.N_particles):
+            # Step 1: Given a particle, find the cell it belongs to 
+            pos = self.find_cell(coords[i])
+            
+            # Step 2: Identify the neighboring cells
+            nn_cells = self.neighbor_cells(pos)
+            
+            cells_copy = copy.deepcopy(cells)  # to prevent some elements in cells from being removed by the loop below
+            # Setp 3: Find the indices of the neighboring particles to loop over (not necessarily interacting)
+            for j in range(len(nn_cells)):
+                #if i not in cells[nn_cells[j]]:  # don't include particle i itself
+                if j == 0:  # the same cell of particle i
+                    cells_copy[nn_cells[j]].remove(i)  # do not include particle i itself
+                    cells_copy[nn_cells[j]] = np.array(cells_copy[nn_cells[j]])  # so that we can use filter like A[A>3]
+                    cells_copy[nn_cells[j]] = list(cells_copy[nn_cells[j]][cells_copy[nn_cells[j]] > i])
+                    # So if particle 1 and 2 are in cell (0, 1), when i == 1, and j == 0 (searhcing the cell (0, 1))
+                    # particle 2 will be added to the list of particle 1. Then, when i == 2, and j == 0 (search the cell (0, 1) again)
+                    # particle 1 won't be added to the list of particle 2, since we don't have to calculate f_ji and p_ji
+                    # after we calculate f_ij and p_ij
+                c_list[i] = c_list[i] + cells_copy[nn_cells[j]]
+
+        return c_list
+
+    def find_cell(self, coord_i):
+        # Given the coordinates of a particle, this function returns the cell (tuple) it belongs to
+        coord_min = np.ones(self.dimension) * (-self.box_length * 0.5)  # lower left corner (cell (0, 0))
+        pos = []
+        r_ij_vec = coord_i - coord_min
+        for i in range(self.dimension):
+            pos.append(int(np.floor(r_ij_vec[i] / self.r_cell)))
+        pos = tuple(pos)
+
+        return pos
+
+    def all_cells(self, coords):
+        # This function sort all the particles into different cells
+        self.n_cell = int(np.ceil(self.box_length / self.r_cell)) # number of cells per side
+        cell_pos = list(product(range(self.n_cell), repeat=self.dimension))
+        cells = {}
+        for i in range(self.n_cell ** 2):
+            cells[cell_pos[i]] = []   # initilize the cell list
+            # In the end, cells = {(0, 0):[3, 7, 15], (0, 1):[1, 4, 8], (0, 2):[2, 31], ...}
+            # which means that particle 3, 7, 15 are in cell (0, 0)
+
+        coord_min = np.ones(self.dimension) * (-self.box_length * 0.5)  # lower left corner (cell (0, 0))
+        for i in range(self.N_particles):
+            pos = self.find_cell(coords[i])
+            cells[pos].append(i)
+
+        return cells
+    
+
+    def neighbor_cells(self, cell):
+        # This function returns a list of the indices (tuple) of the cell of interest
+        # and half of its neighbor cells. For a shematic representation, please refer 
+        # Figure 5.5 (a) in Allen & Tildesley. If the input is cell 8, the the output
+        # will be 8, 13, 4, 9, 4. PBC is applied. The input should be a tuple.
+        # Note that this is only for 2D cell lists.
+        # Example, input: (x, y), output: [(x, y), (x, y + 1), (x+1, y), (x + 1, y+1), (x + 1, y - 1)]
+        # if (x, y) is not on the edge of the box.
+        nn_cells = [cell]
+        c = list(cell)  # center cell / the cell of interest
+        if self.PBC == 'yes':
+            nn_cells.append(tuple([c[0], (c[1] + 1) % self.n_cell]))
+            nn_cells.append(tuple([(c[0] + 1) % self.n_cell, c[1]]))
+            nn_cells.append(tuple([(c[0] + 1) % self.n_cell, (c[1] + 1) % self.n_cell]))
+            nn_cells.append(tuple([(c[0] + 1) % self.n_cell, (c[1] - 1) % self.n_cell]))
+        else:
+            if c[0] + 1 < self.n_cell:
+                nn_cells.append(tuple([c[0] + 1, c[1]]))
+                if c[1] + 1 < self.n_cell:
+                    nn_cells.append(tuple([c[0] + 1, c[1] + 1]))
+                if c[1] -1 >= 0:
+                    nn_cells.append(tuple([c[0] + 1, c[1] - 1]))
+            if c[1] + 1 < self.n_cell:
+                nn_cells.append(tuple([c[0], c[1] + 1]))
+
+        return nn_cells
 
 class Thermostats(Initialization):
     def __init__(self, param):
@@ -582,15 +691,9 @@ class Thermostats(Initialization):
 class MonteCarlo(ComputeForces, ComputePotentials):
     def __init__(self, param_obj):
         attr_dict = vars(param_obj)
-        # print(attr_dict)
         for key in attr_dict:
             setattr(self, key, attr_dict[key])
-
-        #print('In MC:', self.rho)
-        #print('In MC:', self.box_length)
         Initialization.init_coords(self)
-        #print('In MC:', self.rho)
-        #print('In MC:', self.box_length)
 
     def metropolis_algrtm(self, coords):
         for file in os.listdir('.'):
@@ -730,16 +833,20 @@ class MolecularDynamics(ComputeForces, ComputePotentials, ParticleList):
                 os.remove(self.traj_name)
 
         # initial coords are certainly in the box. No need to apply PBC
-        # initial verlet list
+        # Initilization of the list
         if self.search_method == 'verlet':
             vlist = ParticleList.verlet_list(self, coords)
             coords_old = copy.deepcopy(coords)
+        if self.search_method == 'cell':
+            clist = ParticleList.cell_list(self, coords)
 
         # quantities at t = 0
         if self.search_method == 'all-pairs':
             output0 = self.output_data(0, velocities, coords)
         elif self.search_method == 'verlet':
             output0 = self.output_data(0, velocities, coords, vlist)
+        elif self.search_method == 'cell':
+            output0 = self.output_data(0, velocities, coords, clist)
 
         outfile = open(self.traj_name, 'a+', newline='')
         outfile.write('# Output data of MD simulation\n')
@@ -749,10 +856,10 @@ class MolecularDynamics(ComputeForces, ComputePotentials, ParticleList):
             outfile.write(
                 'x-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
             outfile.write(
-                'y-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                'y-coordinates: ' + str([coords_list[i][1] for i in range(len(coords_list))]) + '\n')
             if self.dimension == 3:
                 outfile.write(
-                    'z-coordinates: ' + str([coords_list[i][0] for i in range(len(coords_list))]) + '\n')
+                    'z-coordinates: ' + str([coords_list[i][2] for i in range(len(coords_list))]) + '\n')
 
         # start the verlet integration
         # Note that PBC has been applied in total_force
@@ -791,7 +898,14 @@ class MolecularDynamics(ComputeForces, ComputePotentials, ParticleList):
                     ComputeForces.total_force(self, coords, vlist)
 
             elif self.search_method == 'cell':
-                pass
+                v_half = velocities +(self.dt / (2 * self.m)) * \
+                    ComputeForces.total_force(self, coords, clist)
+                coords = coords + v_half * self.dt
+                if self.PBC == 'yes':
+                    coords -= self.box_length * np.round(coords / self.box_length)
+                clist = ParticleList.cell_list(self, coords)
+                velocities = v_half + (self.dt / (2 * self.m)) * \
+                    ComputeForces.total_force(self, coords, clist)
 
             else:
                 print('Error! The search method should be "all-pairs", "verlet", or "cell".')
@@ -827,6 +941,9 @@ class MolecularDynamics(ComputeForces, ComputePotentials, ParticleList):
                 output = self.output_data(i + 1, velocities, coords)
             elif self.search_method == 'verlet':
                 output = self.output_data(i + 1, velocities, coords, vlist)
+            elif self.search_method == 'cell':
+                output = self.output_data(i + 1, velocities, coords, clist)
+
             if i % self.print_freq == self.print_freq - 1:
                 outfile.write("\n")
                 yaml.dump(output, outfile, default_flow_style=False)
