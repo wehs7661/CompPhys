@@ -147,6 +147,7 @@ class Initialization:
             self.examine_params('r_cell', False, self.r_c * 1.1)
 
         # print options
+        self.examine_params('print_param', False, 'no')
         self.examine_params('print_coords', False, 'yes')
         self.examine_params('print_Ek', False, 'yes')
         self.examine_params('print_Ep', False, 'yes')
@@ -156,18 +157,19 @@ class Initialization:
         self.examine_params('print_L_total', False, 'yes')
 
         # Step 2: Print the adopted parameters to a yaml file
-        adopted_params = copy.deepcopy(vars(self))
-        del adopted_params['param']
-        out_param_name = param.split('.')[0] + '_adopted_params.yml'
+        if self.print_param == 'yes':        
+            adopted_params = copy.deepcopy(vars(self))
+            del adopted_params['param']
+            out_param_name = param.split('.')[0] + '_adopted_params.yml'
 
-        for file in os.listdir('.'):
-            if file == out_param_name:
-                # make the the output file is newly made
-                os.remove(out_param_name)
+            for file in os.listdir('.'):
+                if file == out_param_name:
+                    # make the the output file is newly made
+                    os.remove(out_param_name)
 
-        out_params = open(out_param_name, 'a+', newline='')
-        out_params.write('# Adopted simulation parameters\n')
-        yaml.dump(adopted_params, out_params, default_flow_style=False)
+            out_params = open(out_param_name, 'a+', newline='')
+            out_params.write('# Adopted simulation parameters\n')
+            yaml.dump(adopted_params, out_params, default_flow_style=False)
 
         # Step 3: Add other attributes
         self.prefix = param.split('.')[0]
@@ -368,21 +370,21 @@ class ComputeForces(Initialization):
                     loop_range = prtcl_list[i]
 
                 for j in loop_range:
-                    if self.search_method == 'all-pairs' or 'verlet':
+                    if self.search_method == 'all-pairs' or self.search_method == 'verlet':
                         if j < i:
                             f_matrix[:, i, j] = self.LJ_force_ij(coords[i], coords[j])
+                        
                         elif j > i:
                             break   # break the loop once cross the diagonal to prevent repeptive calculation
                     
                     if self.search_method == 'cell':
-                        if i != j:
-                            f_matrix[:, i, j] = self.LJ_force_ij(coords[i], coords[j])
+                        f_matrix[:, i, j] = self.LJ_force_ij(coords[i], coords[j])
                         # since only half of the neighbors were considered in neighbor_cells
                         # looping over the whole cell list should give half (instead of the whole)
                         # f_matrix. Note that for vlist = [[0, 4, 5], ...], particle 0 must apppear
                         # in the list of partcile 4. However, if clist = [0, 4, 5], particle 0 should not 
                         # appear in the list of particle 4. This is the difference between clist and vlist.
-            
+
             # then we finish the contruction of the symmetric matrix for each component
             for i in range(self.dimension):
                 f_matrix[i] = -(f_matrix[i] -  f_matrix[i].transpose())

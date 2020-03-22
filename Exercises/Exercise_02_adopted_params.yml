@@ -1,8 +1,8 @@
 # Adopted simulation parameters
-N_particles: 2000
-N_steps: 0
+N_particles: 10
+N_steps: 3000
 PBC: 'yes'
-box_length: 50.0
+box_length: 3.5355339059327378
 coords_method: lattice
 delta: 0.37753795
 dimension: 2
@@ -18,7 +18,7 @@ print_Ek: 'yes'
 print_Ep: 'yes'
 print_Etotal: 'yes'
 print_L_total: 'no'
-print_coords: 'yes'
+print_coords: 'no'
 print_freq: 1
 print_pressure: 'no'
 print_temp: 'no'

@@ -1,7 +1,7 @@
 # Simulation parameters
 simulation: MD
-N_particles: 200
-N_steps: 0
+N_particles: 10
+N_steps: 3000
 dt: 0.001
 m: 1
 r_c: 2.5 # the distance cutoff for the interaction potential (r_c = 0 : no truncation)
@@ -30,7 +30,8 @@ delta: 0.37753795      # the neighbor list skin, delta = r_v-r_c
 
 # print options
 print_freq: 1
-print_coords: 'yes'
+print_param: 'no'
+print_coords: 'no'
 print_Ek: 'yes'
 print_Ep: 'yes'
 print_Etotal: 'yes'
