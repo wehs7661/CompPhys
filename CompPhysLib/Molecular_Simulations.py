@@ -2,6 +2,7 @@ import os
 import sys
 import yaml
 import copy
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import maxwell
@@ -145,6 +146,7 @@ class Initialization:
 
         if self.search_method == 'cell':
             self.examine_params('r_cell', False, self.r_c * 1.1)
+            self.n_cell = int(np.ceil(self.box_length / self.r_cell)) # number of cells per side
 
         # print options
         self.examine_params('print_param', False, 'no')
@@ -376,7 +378,7 @@ class ComputeForces(Initialization):
                         
                         elif j > i:
                             break   # break the loop once cross the diagonal to prevent repeptive calculation
-                    
+
                     if self.search_method == 'cell':
                         f_matrix[:, i, j] = self.LJ_force_ij(coords[i], coords[j])
                         # since only half of the neighbors were considered in neighbor_cells
@@ -384,7 +386,7 @@ class ComputeForces(Initialization):
                         # f_matrix. Note that for vlist = [[0, 4, 5], ...], particle 0 must apppear
                         # in the list of partcile 4. However, if clist = [0, 4, 5], particle 0 should not 
                         # appear in the list of particle 4. This is the difference between clist and vlist.
-
+            
             # then we finish the contruction of the symmetric matrix for each component
             for i in range(self.dimension):
                 f_matrix[i] = -(f_matrix[i] -  f_matrix[i].transpose())
@@ -520,8 +522,7 @@ class ComputePotentials(Initialization):
             # instead of calculating everything at once and storing the result in memory.
             # Therefore, we don't use ij_pair = list(combinations(...)) and loop over the list, which is slower.
             p_total = 0
-            # print(prtcl_list)  # worthy to take a look
-            ij = []
+            #print(prtcl_list)  # worthy to take a look
             for i in range(self.N_particles):
                 
                 if self.search_method == 'all-pairs':
@@ -535,14 +536,21 @@ class ComputePotentials(Initialization):
                     
                     if self.search_method == 'all-pairs' or self.search_method == 'verlet':
                         if j < i:
-                            ij.append([i, j, self.LJ_potential(coords[i], coords[j])])
+                            #print([i, j, self.LJ_potential(coords[i], coords[j])])
                             p_total += self.LJ_potential(coords[i], coords[j])
                         elif j > i:
                             break
+                    
+                    
                     if self.search_method == 'cell':
-                        ij.append([i, j, self.LJ_potential(coords[i], coords[j])])
+                        #if j != i:
+                        #print([i, j, self.LJ_potential(coords[i], coords[j])])
                         p_total += self.LJ_potential(coords[i], coords[j])
-
+                    
+                    """
+                    if self.search_method == 'cell':
+                            p_total += self.LJ_potential(coords[i], coords[j])
+                    """
             if self.tail_correction == 'yes':
                 rc_term = (1 / 3) * (1 / self.r_c) ** 9 - (1 / self.r_c) ** 3
                 u_tail = (8 / 3) * np.pi * self.rho * rc_term
@@ -598,28 +606,21 @@ class ParticleList(Initialization):
         for i in range(self.N_particles):
             c_list.append([])
 
-        cells = self.all_cells(coords)
-
+        #cells, particles = self.all_cells(coords)
+        self.all_cells(coords)   # so now we have self.cells and self.particles
         for i in range(self.N_particles):
             # Step 1: Given a particle, find the cell it belongs to 
-            pos = self.find_cell(coords[i])
+            pos = self.particles[i]
             
             # Step 2: Identify the neighboring cells
             nn_cells = self.neighbor_cells(pos)
-            
-            cells_copy = copy.deepcopy(cells)  # to prevent some elements in cells from being removed by the loop below
+                        
             # Setp 3: Find the indices of the neighboring particles to loop over (not necessarily interacting)
             for j in range(len(nn_cells)):
-                #if i not in cells[nn_cells[j]]:  # don't include particle i itself
                 if j == 0:  # the same cell of particle i
-                    cells_copy[nn_cells[j]].remove(i)  # do not include particle i itself
-                    cells_copy[nn_cells[j]] = np.array(cells_copy[nn_cells[j]])  # so that we can use filter like A[A>3]
-                    cells_copy[nn_cells[j]] = list(cells_copy[nn_cells[j]][cells_copy[nn_cells[j]] > i])
-                    # So if particle 1 and 2 are in cell (0, 1), when i == 1, and j == 0 (searhcing the cell (0, 1))
-                    # particle 2 will be added to the list of particle 1. Then, when i == 2, and j == 0 (search the cell (0, 1) again)
-                    # particle 1 won't be added to the list of particle 2, since we don't have to calculate f_ji and p_ji
-                    # after we calculate f_ij and p_ij
-                c_list[i] = c_list[i] + cells_copy[nn_cells[j]]
+                    c_list[i] += [k for k in self.cells[nn_cells[j]] if k > i]
+                else:
+                    c_list[i] = c_list[i] + self.cells[nn_cells[j]] 
 
         return c_list
 
@@ -628,28 +629,30 @@ class ParticleList(Initialization):
         coord_min = np.ones(self.dimension) * (-self.box_length * 0.5)  # lower left corner (cell (0, 0))
         pos = []
         r_ij_vec = coord_i - coord_min
+        if self.PBC == 'yes':
+                r_ij_vec -= self.box_length * np.round(r_ij_vec / self.box_length)
         for i in range(self.dimension):
-            pos.append(int(np.floor(r_ij_vec[i] / self.r_cell)))
+            pos.append(int(np.floor(r_ij_vec[i] / self.r_cell)) % self.n_cell)
         pos = tuple(pos)
 
         return pos
 
     def all_cells(self, coords):
+
         # This function sort all the particles into different cells
-        self.n_cell = int(np.ceil(self.box_length / self.r_cell)) # number of cells per side
         cell_pos = list(product(range(self.n_cell), repeat=self.dimension))
-        cells = {}
+        self.cells, self.particles = {}, {}
         for i in range(self.n_cell ** 2):
-            cells[cell_pos[i]] = []   # initilize the cell list
+            self.cells[cell_pos[i]] = []   # initilize the cell dictionary
             # In the end, cells = {(0, 0):[3, 7, 15], (0, 1):[1, 4, 8], (0, 2):[2, 31], ...}
             # which means that particle 3, 7, 15 are in cell (0, 0)
 
-        coord_min = np.ones(self.dimension) * (-self.box_length * 0.5)  # lower left corner (cell (0, 0))
         for i in range(self.N_particles):
             pos = self.find_cell(coords[i])
-            cells[pos].append(i)
+            self.cells[pos].append(i)
+            self.particles[i] = pos
 
-        return cells
+        #return cells, particles
     
 
     def neighbor_cells(self, cell):
@@ -667,6 +670,7 @@ class ParticleList(Initialization):
             nn_cells.append(tuple([(c[0] + 1) % self.n_cell, c[1]]))
             nn_cells.append(tuple([(c[0] + 1) % self.n_cell, (c[1] + 1) % self.n_cell]))
             nn_cells.append(tuple([(c[0] + 1) % self.n_cell, (c[1] - 1) % self.n_cell]))
+
         else:
             if c[0] + 1 < self.n_cell:
                 nn_cells.append(tuple([c[0] + 1, c[1]]))
@@ -678,6 +682,7 @@ class ParticleList(Initialization):
                 nn_cells.append(tuple([c[0], c[1] + 1]))
 
         return nn_cells
+
 
 class Thermostats(Initialization):
     def __init__(self, param):
@@ -905,7 +910,18 @@ class MolecularDynamics(ComputeForces, ComputePotentials, ParticleList):
                 coords = coords + v_half * self.dt
                 if self.PBC == 'yes':
                     coords -= self.box_length * np.round(coords / self.box_length)
-                clist = ParticleList.cell_list(self, coords)
+
+                # check if the cell list needs to be update
+                for i in range(self.N_particles):
+                    pos = ParticleList.find_cell(self, coords[i])
+                    if pos == self.particles[i]:
+                        continue
+                    else:
+                        clist = ParticleList.cell_list(self, coords)
+                        break
+
+
+                #clist = ParticleList.cell_list(self, coords)
                 velocities = v_half + (self.dt / (2 * self.m)) * \
                     ComputeForces.total_force(self, coords, clist)
 
