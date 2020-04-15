@@ -145,7 +145,7 @@ class Initialization:
                 sys.exit()
 
         if self.search_method == 'cell':
-            self.examine_params('r_cell', False, self.r_c * 1.1)
+            self.examine_params('r_cell', False, self.r_c * 1.2)
             self.n_cell = int(np.ceil(self.box_length / self.r_cell)) # number of cells per side
 
         # print options
@@ -386,7 +386,6 @@ class ComputeForces(Initialization):
                         # f_matrix. Note that for vlist = [[0, 4, 5], ...], particle 0 must apppear
                         # in the list of partcile 4. However, if clist = [0, 4, 5], particle 0 should not 
                         # appear in the list of particle 4. This is the difference between clist and vlist.
-            
             # then we finish the contruction of the symmetric matrix for each component
             for i in range(self.dimension):
                 f_matrix[i] = -(f_matrix[i] -  f_matrix[i].transpose())
@@ -522,7 +521,7 @@ class ComputePotentials(Initialization):
             # instead of calculating everything at once and storing the result in memory.
             # Therefore, we don't use ij_pair = list(combinations(...)) and loop over the list, which is slower.
             p_total = 0
-            #print(prtcl_list)  # worthy to take a look
+            # print(prtcl_list)  # worthy to take a look
             for i in range(self.N_particles):
                 
                 if self.search_method == 'all-pairs':
@@ -536,21 +535,18 @@ class ComputePotentials(Initialization):
                     
                     if self.search_method == 'all-pairs' or self.search_method == 'verlet':
                         if j < i:
-                            #print([i, j, self.LJ_potential(coords[i], coords[j])])
+                            #if self.LJ_potential(coords[i], coords[j]) != 0:
+                            #    print([i, j, self.LJ_potential(coords[i], coords[j])])
                             p_total += self.LJ_potential(coords[i], coords[j])
                         elif j > i:
                             break
                     
                     
                     if self.search_method == 'cell':
-                        #if j != i:
-                        #print([i, j, self.LJ_potential(coords[i], coords[j])])
+                        #if self.LJ_potential(coords[i], coords[j]) != 0:
+                        #    print([i, j, self.LJ_potential(coords[i], coords[j])])
                         p_total += self.LJ_potential(coords[i], coords[j])
                     
-                    """
-                    if self.search_method == 'cell':
-                            p_total += self.LJ_potential(coords[i], coords[j])
-                    """
             if self.tail_correction == 'yes':
                 rc_term = (1 / 3) * (1 / self.r_c) ** 9 - (1 / self.r_c) ** 3
                 u_tail = (8 / 3) * np.pi * self.rho * rc_term
@@ -912,16 +908,14 @@ class MolecularDynamics(ComputeForces, ComputePotentials, ParticleList):
                     coords -= self.box_length * np.round(coords / self.box_length)
 
                 # check if the cell list needs to be update
-                for i in range(self.N_particles):
-                    pos = ParticleList.find_cell(self, coords[i])
-                    if pos == self.particles[i]:
+                for j in range(self.N_particles):
+                    pos = ParticleList.find_cell(self, coords[j])
+                    if pos == self.particles[j]:
                         continue
                     else:
                         clist = ParticleList.cell_list(self, coords)
                         break
 
-
-                #clist = ParticleList.cell_list(self, coords)
                 velocities = v_half + (self.dt / (2 * self.m)) * \
                     ComputeForces.total_force(self, coords, clist)
 
